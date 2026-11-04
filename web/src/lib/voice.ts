@@ -1,12 +1,22 @@
+import { Capacitor, registerPlugin } from "@capacitor/core"
+
 /**
  * Voice input and read-aloud.
  *
  * Speech to text records a clip in the WebView and posts it to the server, which calls Groq
  * Whisper. The key never reaches the client.
  *
- * Text to speech uses the platform voice: on Android the WebView's `speechSynthesis` is backed
- * by the system TTS engine, so replies read out in the installed language voice.
+ * Text to speech uses the Android system TTS engine through the local Speaker plugin. The
+ * WebView's own `speechSynthesis` is kept as a fallback for the browser and older APKs.
  */
+
+interface SpeakerPlugin {
+  /** Resolves when the utterance finishes, or when it is replaced. */
+  speak(options: { text: string; language: string }): Promise<void>;
+  stop(): Promise<void>;
+}
+
+const Speaker = registerPlugin<SpeakerPlugin>("Speaker");
 
 /** Turkish, Arabic or English, the languages this app is used in. */
 export type VoiceLanguage = "tr" | "ar" | "en"
@@ -90,6 +100,8 @@ export function startRecording(): Recording {
  * -------------------------------------------------------------------------------------------------*/
 
 export function speechSupported(): boolean {
+  // The native plugin is always there in a current APK.
+  if (Capacitor.isNativePlatform()) return true
   return typeof window !== "undefined" && "speechSynthesis" in window
 }
 
@@ -136,17 +148,13 @@ export interface SpeakHandlers {
   onEnd?: () => void
 }
 
-/** Read text out loud, replacing anything already speaking. Returns false when unsupported. */
-export function speak(text: string, handlers: SpeakHandlers = {}): boolean {
-  if (!speechSupported()) return false
-  const clean = speakableText(text)
-  if (!clean) return false
-
+/** The WebView voice, used in the browser and as a fallback for older APKs. */
+function speakWithWeb(clean: string, locale: string, handlers: SpeakHandlers): boolean {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return false
   window.speechSynthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(clean)
-  const language = languageFor(clean)
-  utterance.lang = LOCALES[language]
-  const voice = voiceFor(utterance.lang)
+  utterance.lang = locale
+  const voice = voiceFor(locale)
   if (voice) utterance.voice = voice
   utterance.onstart = () => handlers.onStart?.()
   utterance.onend = () => handlers.onEnd?.()
@@ -155,6 +163,36 @@ export function speak(text: string, handlers: SpeakHandlers = {}): boolean {
   return true
 }
 
+/** Read text out loud, replacing anything already speaking. Returns false when unsupported. */
+export function speak(text: string, handlers: SpeakHandlers = {}): boolean {
+  const clean = speakableText(text)
+  if (!clean) return false
+
+  const locale = LOCALES[languageFor(clean)]
+
+  // Native: the system TextToSpeech engine through the Speaker plugin. Its
+  // promise settles when the reply finishes, so the button can go back to
+  // "Read aloud" on its own.
+  if (Capacitor.isNativePlatform()) {
+    handlers.onStart?.()
+    void Speaker.speak({ text: clean, language: locale }).then(
+      () => handlers.onEnd?.(),
+      () => {
+        // An APK from before the plugin existed: fall back to the WebView.
+        if (!speakWithWeb(clean, locale, handlers)) handlers.onEnd?.()
+      },
+    )
+    return true
+  }
+
+  return speakWithWeb(clean, locale, handlers)
+}
+
 export function stopSpeaking(): void {
-  if (speechSupported()) window.speechSynthesis.cancel()
+  if (Capacitor.isNativePlatform()) {
+    void Speaker.stop().catch(() => {})
+  }
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel()
+  }
 }

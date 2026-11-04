@@ -128,7 +128,7 @@ public class DownloaderPlugin extends Plugin {
         }
     }
 
-    /** Open a finished download in the app that handles its type. */
+    /** Open a finished download in an app the student picks. */
     @PluginMethod
     public void open(PluginCall call) {
         Long id = downloadId(call);
@@ -153,16 +153,31 @@ public class DownloaderPlugin extends Plugin {
                 call.reject("The file is still downloading");
                 return;
             }
-            int uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
             int typeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE);
-            String uriString = cursor.getString(uriIndex);
             String mime = typeIndex >= 0 && !cursor.isNull(typeIndex) ? cursor.getString(typeIndex) : null;
+            if (mime == null || mime.isEmpty()) {
+                mime = manager.getMimeTypeForDownloadedFile(id);
+            }
 
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(Uri.parse(uriString), mime != null ? mime : "*/*");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(intent);
+            // The content URI, not COLUMN_LOCAL_URI. A file:// URI cannot be handed
+            // to another app on Android 7 and later, which is why the old button did
+            // nothing. DownloadManager exposes a content URI the target can read.
+            Uri content = manager.getUriForDownloadedFile(id);
+            if (content == null) {
+                call.reject("The file is not available yet");
+                return;
+            }
+
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(content, mime != null && !mime.isEmpty() ? mime : "*/*");
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            // Always ask which app. A bare ACTION_VIEW jumps straight into a default
+            // handler, and the student has no way to pick a PDF reader or an editor.
+            Intent chooser = Intent.createChooser(view, "Open with");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(chooser);
             call.resolve();
         } catch (ActivityNotFoundException error) {
             call.reject("No app can open this file", error);

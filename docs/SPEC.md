@@ -161,10 +161,12 @@ card renders again and the broker still holds the wait.
   reply has Read aloud.
 - Voice: the mic records in the WebView, the server sends the clip to Groq
   Whisper (`POST /transcribe`) and the text lands in the composer. It works in
-  Turkish, Arabic and English. Read aloud uses the platform voice through
-  `speechSynthesis`, which is the Android TTS engine in the WebView, and picks a
-  voice from the script of the text. Without a Groq key the mic says so instead
-  of failing silently.
+  Turkish, Arabic and English. Read aloud goes through a `Speaker` plugin that
+  uses the Android system `TextToSpeech` engine, so it speaks with the voice the
+  student already has installed and configured. The page falls back to
+  `speechSynthesis` in a browser or on an older APK. The language is picked from
+  the script of the text. Without a Groq key the mic says so instead of failing
+  silently.
 - Forking at a user turn seeds a new session with the turns before it and
   resends that text. Forking at an assistant turn seeds through that reply and
   leaves the new chat ready for the next question. Seeds are text only: Pi is
@@ -175,10 +177,12 @@ card renders again and the broker still holds the wait.
   the system `DownloadManager`. The server sends `Content-Disposition` with the
   real name and extension, so a PDF lands as `report.pdf` in Downloads. The
   client polls the download and shows a notice at the top of the screen (below
-  the floating buttons) with Open when it is ready. A status query that fails is
-  not a failed download: the client keeps watching and says "Download started"
-  if the query stays unavailable. In a plain browser a normal `<a download>` is
-  used.
+  the floating buttons) with Open when it is ready. Open asks the manager for the
+  downloaded file's content URI and sends it to `ACTION_VIEW` through
+  `Intent.createChooser`, so Android shows the apps that can handle that type and
+  grants the chosen one read access. A status query that fails is not a failed
+  download: the client keeps watching and says "Download started" if the query
+  stays unavailable. In a plain browser a normal `<a download>` is used.
 - Android 15 and later run apps edge to edge. `MainActivity` turns the system
   bars into `--safe-top`, `--safe-bottom` and side inset variables, and the app
   shell pads the floating buttons, the drawer and the composer with them. The

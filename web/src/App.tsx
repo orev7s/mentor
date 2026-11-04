@@ -248,7 +248,12 @@ export default function App() {
         <DownloadToast
           file={saved}
           onOpen={() => {
-            if (saved.id !== null) void openDownload(saved.id);
+            if (saved.id === null) return;
+            void openDownload(saved.id).catch((error) => {
+              const note =
+                error instanceof Error ? error.message : "No app could open this file.";
+              setSaved((current) => (current ? { ...current, note } : current));
+            });
           }}
           onDismiss={() => setSaved(null)}
         />

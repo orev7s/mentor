@@ -6,6 +6,8 @@ export interface SavedFile {
   id: number | null;
   name: string;
   state: DownloadState | "started";
+  /** A short line under the name, such as why Open failed. */
+  note?: string;
 }
 
 /**
@@ -63,7 +65,8 @@ export function DownloadToast({
                   : "Saved to Downloads"}
           </p>
           <p className="chatcn-text-12 text-chatcn-fg-subtle truncate">
-            {started ? `${file.name} · check your notifications` : file.name}
+            {file.note ??
+              (started ? `${file.name} · check your notifications` : file.name)}
           </p>
         </div>
 

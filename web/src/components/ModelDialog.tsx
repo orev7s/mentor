@@ -73,10 +73,14 @@ export function ModelDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent size="lg" showClose={false} className="gap-0 p-0 sm:max-w-xl">
-        <div className="border-chatcn-border flex items-center gap-3 border-b px-4 py-3.5">
+      <DialogContent
+        size="lg"
+        showClose={false}
+        className="max-h-[min(80dvh,34rem)] gap-0 p-0 sm:max-w-lg"
+      >
+        <div className="border-chatcn-border flex items-center gap-3 border-b px-4 py-3">
           <div className="min-w-0 flex-1">
-            <DialogTitle className="chatcn-text-15">Choose a model</DialogTitle>
+            <DialogTitle className="chatcn-text-14">Choose a model</DialogTitle>
             <DialogDescription className="chatcn-text-12 mt-0.5">
               {configured.length
                 ? "Models from your configured providers."
@@ -94,9 +98,9 @@ export function ModelDialog({
           </button>
         </div>
 
-        <div className="border-chatcn-border border-b px-3 py-2">
-          <div className="bg-chatcn-bg-subtle border-chatcn-border focus-within:border-chatcn-border-strong flex h-9 items-center gap-2 rounded-chatcn-md border px-2.5 transition-colors">
-            <SearchIcon className="text-chatcn-fg-subtle size-4 shrink-0" />
+        <div className="border-chatcn-border border-b px-3 py-1.5">
+          <div className="bg-chatcn-bg-subtle border-chatcn-border focus-within:border-chatcn-border-strong flex h-8 items-center gap-2 rounded-chatcn-md border px-2.5 transition-colors">
+            <SearchIcon className="text-chatcn-fg-subtle size-3.5 shrink-0" />
             <input
               autoFocus
               data-testid="model-search"
@@ -118,12 +122,12 @@ export function ModelDialog({
           </div>
         </div>
 
-        <div className="chatcn-scroll min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="chatcn-scroll min-h-0 flex-1 overflow-y-auto p-1.5">
           {groups.map(([provider, models]) => {
             const ready = configured.includes(provider);
             return (
-              <div key={provider} className="mb-2">
-                <div className="text-chatcn-fg-subtle flex items-center gap-2 px-2 py-1.5 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
+              <div key={provider} className="mb-1.5">
+                <div className="text-chatcn-fg-subtle flex items-center gap-2 px-2 py-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
                   <span className="truncate">{providerLabel(provider)}</span>
                   {ready ? <Badge tone="ready">ready</Badge> : null}
                   <span className="flex-1" />
@@ -142,19 +146,17 @@ export function ModelDialog({
                           onClose();
                         }}
                         className={cn(
-                          "chatcn-focus rounded-chatcn-md flex w-full min-w-0 items-center gap-3 px-2.5 py-2 text-start transition-colors",
+                          "chatcn-focus rounded-chatcn-md flex h-9 w-full min-w-0 items-center gap-2.5 px-2.5 text-start transition-colors",
                           selected ? "bg-chatcn-fill" : "hover:bg-chatcn-fill-hover",
                         )}
                       >
-                        <span className="min-w-0 flex-1">
-                          <span className="chatcn-text-13 text-chatcn-fg block truncate font-medium">
-                            {item.name}
-                          </span>
-                          <span className="chatcn-text-12 text-chatcn-fg-subtle block truncate font-mono">
-                            {item.id}
-                          </span>
+                        <span className="chatcn-text-13 text-chatcn-fg min-w-0 flex-1 truncate font-medium">
+                          {item.name}
                         </span>
-                        <span className="text-chatcn-fg-subtle flex shrink-0 items-center gap-2">
+                        <span className="chatcn-text-12 text-chatcn-fg-subtle hidden max-w-[38%] min-w-0 truncate font-mono sm:block">
+                          {item.id}
+                        </span>
+                        <span className="text-chatcn-fg-subtle flex shrink-0 items-center gap-1.5">
                           {item.input.includes("image") ? <Badge>vision</Badge> : null}
                           {item.contextWindow ? (
                             <span className="chatcn-text-12 tabular-nums">
@@ -182,7 +184,7 @@ export function ModelDialog({
         <button
           type="button"
           onClick={() => setShowAll((value) => !value)}
-          className="chatcn-focus chatcn-text-12 text-chatcn-fg-muted hover:text-chatcn-fg border-chatcn-border hover:bg-chatcn-fill-hover flex shrink-0 items-center justify-center border-t px-4 py-3 font-medium transition-colors"
+          className="chatcn-focus chatcn-text-12 text-chatcn-fg-muted hover:text-chatcn-fg border-chatcn-border hover:bg-chatcn-fill-hover flex shrink-0 items-center justify-center border-t px-4 py-2 font-medium transition-colors"
         >
           {showAll ? "Show only ready providers" : `Show all ${mentor.models.length} models`}
         </button>

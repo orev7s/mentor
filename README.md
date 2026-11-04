@@ -33,15 +33,15 @@ calls stay in the thread.
   the same run. Use it when the student asks to be quizzed or when the agent
   needs a decision before it starts
 - voice: a mic records a clip, the server transcribes it with Groq Whisper, and
-  the text lands in the composer. Turkish, Arabic and English. Every reply has
-  Read aloud, using the platform voice
+  the text lands in the composer. Turkish, Arabic and English. Every agent reply
+  has a Read aloud button that uses the Android system text-to-speech engine
 - attachments in the composer (PDF, DOCX, images, text) that the agent reads with
   `read_document`/`ocr_image`
 - at the end of every run, a card listing the files that run created or changed,
   each with its own download button
 - `share_file` cards, where the agent points at one deliverable and offers it
 - a download notice at the top of the screen that says it started, then saved,
-  with Open
+  with Open, which asks which installed app should open the file
 - copy on every message, Read aloud on every agent reply, and Fork from here to
   branch a chat at any turn
 
@@ -53,8 +53,11 @@ The layout is mobile first. Tap targets grow on touch. The floating buttons and
 composer clear the system bars and the keyboard through insets pushed from
 `MainActivity`, which matters on Android 15 and later where apps are edge to
 edge. Downloads on Android go through the system `DownloadManager`, so a PDF
-saves as a PDF, not `download.bin`. A status query that fails is not treated as
-a failed download: the file can be saved while the query is unavailable.
+saves as a PDF, not `download.bin`. Open hands the finished download to Android's
+app chooser, using the content URI the manager exposes, so the student picks a PDF
+reader, Files, or whatever else handles that type. A status query that fails is
+not treated as a failed download: the file can be saved while the query is
+unavailable.
 
 ## The agent toolset
 

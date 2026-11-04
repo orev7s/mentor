@@ -814,8 +814,11 @@ const AgentMessage = React.memo(function AgentMessage({
       <MessageAction
         label={speaking ? "Stop reading" : "Read aloud"}
         onClick={() => onSpeak(message)}
+        size="sm"
+        className="border-chatcn-border bg-chatcn-card hover:bg-chatcn-fill-hover gap-1.5 rounded-chatcn-sm border"
       >
         {speaking ? <VolumeXIcon className="size-4" /> : <Volume2Icon className="size-4" />}
+        <span className="chatcn-text-12 font-medium">{speaking ? "Stop" : "Read aloud"}</span>
       </MessageAction>
     ) : null
 

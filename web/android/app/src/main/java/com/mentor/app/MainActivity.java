@@ -33,6 +33,8 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // The JS download button calls this plugin. Register before super.onCreate, which loads plugins.
         registerPlugin(DownloaderPlugin.class);
+        // Read aloud uses the Android text-to-speech engine through this plugin.
+        registerPlugin(SpeakerPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Android 15 and later force edge-to-edge, so the page runs under the
