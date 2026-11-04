@@ -162,7 +162,7 @@ export function SessionRail({
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent className="px-2">
+      <SidebarContent className="px-2 pt-0 pb-2">
         {groups.length === 0 ? (
           <p className="text-sidebar-foreground/40 px-2 py-3 text-[0.8125rem]">
             {query.trim() ? "No chats match." : "No chats yet."}
@@ -170,7 +170,7 @@ export function SessionRail({
         ) : null}
         {groups.map((group) => (
           <SidebarGroup key={group.label} className="gap-0.5">
-            <SidebarGroupLabel className="bg-sidebar sticky top-0 z-10">
+            <SidebarGroupLabel className="bg-sidebar sticky top-0 z-10 mt-2">
               {group.label}
             </SidebarGroupLabel>
             <SidebarMenu>

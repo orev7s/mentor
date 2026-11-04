@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
 import { useMentor } from "@/hooks/use-mentor";
 import { ConnectScreen } from "@/components/ConnectScreen";
 import { SessionRail } from "@/components/SessionRail";
@@ -53,7 +53,37 @@ export default function App() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  // A horizontal swipe from the left edge opens the chat drawer; a swipe left closes it.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
   const todos = useMemo(() => mergedTodos(mentor.messages), [mentor.messages]);
+
+  const onSwipeStart = (event: ReactTouchEvent) => {
+    if (event.touches.length !== 1) {
+      swipeStart.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    swipeStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  };
+
+  const onSwipeEnd = (event: ReactTouchEvent) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start) return;
+    // The desktop rail is a fixed column, so swipes only matter on the drawer.
+    if (window.matchMedia("(min-width: 1024px)").matches) return;
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    // Ignore vertical scrolling and short taps.
+    if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    if (dx > 0 && !railOpen && start.x < 72) {
+      setRailOpen(true);
+    } else if (dx < 0 && railOpen) {
+      setRailOpen(false);
+    }
+  };
 
   const clearTimers = () => {
     if (pollTimer.current) clearTimeout(pollTimer.current);
@@ -167,6 +197,8 @@ export default function App() {
     <div
       ref={shellRef}
       className="bg-chatcn-bg text-chatcn-fg flex h-dvh min-h-0 overflow-hidden"
+      onTouchStart={onSwipeStart}
+      onTouchEnd={onSwipeEnd}
       style={{
         paddingTop: "var(--safe-top)",
         paddingBottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px))",

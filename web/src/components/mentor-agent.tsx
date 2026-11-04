@@ -102,6 +102,7 @@ import {
   isToolPart,
 } from "@/lib/chatcn-types"
 import { type Attachment, formatBytes, type WorkspaceFile } from "@/lib/api"
+import { checkForUpdateNow } from "@/lib/updater"
 import { type Recording, speak, speechSupported, startRecording, stopSpeaking } from "@/lib/voice"
 import { cn } from "@/lib/utils"
 
@@ -1584,6 +1585,17 @@ function MentorAgent({
   // A workspace file opened in the in-app viewer, and the image pager for pending uploads.
   const [previewPath, setPreviewPath] = React.useState<string | null>(null)
   const [lightbox, setLightbox] = React.useState<number | null>(null)
+  // Result of a manual update check, shown as a short pill under the top bar.
+  const [updateNotice, setUpdateNotice] = React.useState<string | null>(null)
+  const updateNoticeTimer = React.useRef<number | undefined>(undefined)
+  const flashUpdateNotice = React.useCallback((message: string, autoHideMs = 6000) => {
+    setUpdateNotice(message)
+    window.clearTimeout(updateNoticeTimer.current)
+    if (autoHideMs > 0) {
+      updateNoticeTimer.current = window.setTimeout(() => setUpdateNotice(null), autoHideMs)
+    }
+  }, [])
+  React.useEffect(() => () => window.clearTimeout(updateNoticeTimer.current), [])
   const [queue, setQueue] = useControllable(queueProp, defaultQueue, onQueueChange)
   const [input, setInput] = React.useState("")
   // Keep the latest draft in a ref so voice transcription and submit can build on
@@ -1693,6 +1705,13 @@ function MentorAgent({
     if (lastMessage?.role === "assistant") setStopped((set) => new Set(set).add(lastMessage.id))
     actions.stop?.()
   }
+
+  const checkUpdates = React.useCallback(async () => {
+    flashUpdateNotice("Checking for updates...", 0)
+    const result = await checkForUpdateNow()
+    // "updated" reloads the app, so this line is only seen for a moment.
+    flashUpdateNotice(result.message, result.status === "updated" ? 4000 : 6000)
+  }, [flashUpdateNotice])
 
   const beginVoice = React.useCallback(async () => {
     if (!onTranscribe) return
@@ -2094,6 +2113,11 @@ function MentorAgent({
                 Settings
               </MenuItem>
             ) : null}
+            <MenuSeparator />
+            <MenuItem onClick={() => void checkUpdates()} data-testid="menu-update">
+              <RefreshCwIcon />
+              Check for updates
+            </MenuItem>
           </MenuContent>
         </Menu>
       </div>
@@ -2119,6 +2143,17 @@ function MentorAgent({
               className="from-chatcn-bg via-chatcn-bg/80 pointer-events-none absolute inset-x-0 top-0 z-20 h-20 bg-gradient-to-b to-transparent"
             />
             {topBar}
+            {updateNotice ? (
+              <div
+                data-slot="update-notice"
+                role="status"
+                className="pointer-events-none absolute inset-x-0 top-14 z-30 flex justify-center px-4"
+              >
+                <span className="bg-chatcn-card text-chatcn-fg shadow-chatcn-lg border-chatcn-border rounded-full border px-3 py-1.5 text-center text-[0.8125rem] font-medium">
+                  {updateNotice}
+                </span>
+              </div>
+            ) : null}
             {thread}
             {composer}
           </div>

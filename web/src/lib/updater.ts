@@ -175,3 +175,48 @@ export function initUpdater(): void {
     });
   }, CHECK_DELAY_MS);
 }
+
+export type UpdateCheckStatus = "updated" | "latest" | "unavailable" | "failed";
+
+export interface UpdateCheckResult {
+  status: UpdateCheckStatus;
+  /** A short line for the UI. */
+  message: string;
+}
+
+/**
+ * The button in the overflow menu. Unlike the launch check, this stages the
+ * update and then reloads straight away, so the student does not have to
+ * background the app twice.
+ */
+export async function checkForUpdateNow(): Promise<UpdateCheckResult> {
+  if (!Capacitor.isNativePlatform()) {
+    return { status: "unavailable", message: "Updates install in the app." };
+  }
+
+  try {
+    const [releases, running] = await Promise.all([fetchReleases(), runningVersion()]);
+    const candidate = pickRelease(releases);
+    if (!candidate || !isNewerVersion(candidate.version, running)) {
+      return { status: "latest", message: "You are on the latest version." };
+    }
+
+    if (localStorage.getItem(PENDING_KEY) !== candidate.version) {
+      const checksum = candidate.checksum ?? (await sha256Of(candidate.url));
+      if (!checksum) return { status: "failed", message: "Could not verify the update." };
+      const bundle = await CapacitorUpdater.download({
+        url: candidate.url,
+        version: candidate.version,
+        checksum,
+      });
+      await CapacitorUpdater.next({ id: bundle.id });
+      localStorage.setItem(PENDING_KEY, candidate.version);
+    }
+
+    // Reload applies the staged bundle now. It never resolves, so do not await it.
+    void CapacitorUpdater.reload().catch(() => {});
+    return { status: "updated", message: `Version ${candidate.version} is ready. Reloading...` };
+  } catch {
+    return { status: "failed", message: "Could not check for updates. Try again later." };
+  }
+}
