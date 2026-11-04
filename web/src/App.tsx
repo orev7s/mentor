@@ -8,6 +8,7 @@ import { DownloadToast, type SavedFile } from "@/components/DownloadToast";
 import { MentorAgent, todosFrom } from "@/components/mentor-agent";
 import type { TodoItem } from "@/components/ui/chatcn/todo-list";
 import { useBackHandler } from "@/lib/back";
+import { redirectToServer } from "@/lib/remote";
 import { PanelLeftIcon, XIcon } from "@/lib/chatcn-icons";
 import { getToolName, isToolPart, type ChatcnMessage } from "@/lib/chatcn-types";
 import {
@@ -56,36 +57,78 @@ export default function App() {
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
-  // A horizontal swipe from the left edge opens the chat drawer; a swipe left closes it.
-  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  // The drawer follows the finger while a horizontal gesture is in progress.
+  // `null` means not dragging; a number is the drawer's translateX in pixels.
+  const [railDrag, setRailDrag] = useState<number | null>(null);
+  const [railWidth, setRailWidth] = useState(280);
+  const railDragRef = useRef<number | null>(null);
+  railDragRef.current = railDrag;
+  const gesture = useRef<{
+    startX: number;
+    startY: number;
+    open: boolean;
+    width: number;
+    active: boolean;
+  } | null>(null);
   const todos = useMemo(() => mergedTodos(mentor.messages), [mentor.messages]);
 
+  // First native pairing: hand the connection to the server origin and reload
+  // there, so the UI runs same-origin with the agent (images and streams included).
+  useEffect(() => {
+    if (mentor.connected) redirectToServer(mentor.url, mentor.token);
+  }, [mentor.connected, mentor.url, mentor.token]);
+
   const onSwipeStart = (event: ReactTouchEvent) => {
-    if (event.touches.length !== 1) {
-      swipeStart.current = null;
+    // The desktop rail is a fixed column, so swipes only matter on the drawer.
+    if (event.touches.length !== 1 || window.matchMedia("(min-width: 1024px)").matches) {
+      gesture.current = null;
       return;
     }
     const touch = event.touches[0];
-    swipeStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+    if (!touch) return;
+    const width = Math.min(280, window.innerWidth * 0.85);
+    setRailWidth(width);
+    gesture.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      open: railOpen,
+      width,
+      active: false,
+    };
   };
 
-  const onSwipeEnd = (event: ReactTouchEvent) => {
-    const start = swipeStart.current;
-    swipeStart.current = null;
-    if (!start) return;
-    // The desktop rail is a fixed column, so swipes only matter on the drawer.
-    if (window.matchMedia("(min-width: 1024px)").matches) return;
-    const touch = event.changedTouches[0];
+  const onSwipeMove = (event: ReactTouchEvent) => {
+    const active = gesture.current;
+    if (!active || event.touches.length !== 1) return;
+    const touch = event.touches[0];
     if (!touch) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    // Ignore vertical scrolling and short taps.
-    if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
-    if (dx > 0 && !railOpen && start.x < 72) {
-      setRailOpen(true);
-    } else if (dx < 0 && railOpen) {
-      setRailOpen(false);
+    const dx = touch.clientX - active.startX;
+    const dy = touch.clientY - active.startY;
+    if (!active.active) {
+      // Wait for a horizontal intent, and require the edge when opening.
+      if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+      if (!active.open && active.startX > 40) {
+        gesture.current = null;
+        return;
+      }
+      active.active = true;
     }
+    const base = active.open ? 0 : -active.width;
+    const next = Math.max(-active.width, Math.min(0, base + dx));
+    setRailDrag(next);
+  };
+
+  const endSwipe = () => {
+    const active = gesture.current;
+    gesture.current = null;
+    if (!active?.active) {
+      setRailDrag(null);
+      return;
+    }
+    const current = railDragRef.current ?? (active.open ? 0 : -active.width);
+    setRailDrag(null);
+    // Past halfway, or a decisive flick, opens; otherwise it settles closed.
+    setRailOpen(current > -active.width * 0.5);
   };
 
   const clearTimers = () => {
@@ -201,7 +244,9 @@ export default function App() {
       ref={shellRef}
       className="bg-chatcn-bg text-chatcn-fg flex h-dvh min-h-0 overflow-hidden"
       onTouchStart={onSwipeStart}
-      onTouchEnd={onSwipeEnd}
+      onTouchMove={onSwipeMove}
+      onTouchEnd={endSwipe}
+      onTouchCancel={endSwipe}
       style={{
         paddingTop: "var(--safe-top)",
         paddingBottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px))",
@@ -215,17 +260,31 @@ export default function App() {
         </aside>
       ) : null}
 
-      {railOpen ? (
-        <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setRailOpen(false)} />
+      {railOpen || railDrag !== null ? (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          style={{
+            opacity:
+              railDrag === null
+                ? 1
+                : Math.min(1, Math.max(0, 1 + railDrag / (railWidth || 280))),
+            pointerEvents:
+              railDrag !== null && railDrag < -(railWidth || 280) * 0.95 ? "none" : undefined,
+          }}
+          onClick={() => setRailOpen(false)}
+        />
       ) : null}
       <aside
         className={
-          "bg-chatcn-bg fixed start-0 z-50 w-[280px] max-w-[85vw] transition-transform duration-200 lg:hidden " +
-          (railOpen ? "translate-x-0" : "-translate-x-full")
+          "bg-chatcn-bg fixed start-0 z-50 w-[280px] max-w-[85vw] lg:hidden " +
+          (railDrag !== null
+            ? "transition-none"
+            : "transition-transform duration-200 " + (railOpen ? "translate-x-0" : "-translate-x-full"))
         }
         style={{
           top: "var(--safe-top)",
           bottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px))",
+          transform: railDrag !== null ? `translateX(${railDrag}px)` : undefined,
         }}
       >
         <SessionRail
