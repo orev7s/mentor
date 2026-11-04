@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { stat } from "node:fs/promises";
+import { basename, extname, join, resolve, sep } from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import multer from "multer";
@@ -9,6 +10,7 @@ import { saveConfig } from "../config.js";
 import { bearerAuth } from "../auth.js";
 import { AgentManager } from "../agent/manager.js";
 import { listModels, resetRuntime } from "../agent/runtime.js";
+import { MIME, listWorkspaceFiles } from "../files.js";
 import {
   PRESETS,
   buildCustomProvider,
@@ -182,6 +184,21 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
     }),
   );
 
+  app.patch(
+    "/sessions/:id",
+    asyncHandler(async (req, res) => {
+      const body = req.body ?? {};
+      const meta = await manager.update(String(req.params.id), {
+        model: typeof body.model === "string" ? body.model : undefined,
+        thinkingLevel:
+          typeof body.thinkingLevel === "string"
+            ? (body.thinkingLevel as ThinkingLevel)
+            : undefined,
+      });
+      res.json({ session: meta });
+    }),
+  );
+
   app.delete(
     "/sessions/:id",
     asyncHandler(async (req, res) => {
@@ -240,6 +257,53 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
         res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
       });
   });
+
+  app.get(
+    "/sessions/:id/files",
+    asyncHandler(async (req, res) => {
+      const session = await manager.get(String(req.params.id));
+      const files = await listWorkspaceFiles(session.meta.cwd);
+      files.sort((a, b) => b.mtime - a.mtime);
+      res.json({ files });
+    }),
+  );
+
+  app.get(
+    "/sessions/:id/file",
+    asyncHandler(async (req, res) => {
+      const session = await manager.get(String(req.params.id));
+      const root = resolve(session.meta.cwd);
+      const rel = String(req.query.path ?? "");
+      if (!rel) {
+        res.status(400).json({ error: "path is required" });
+        return;
+      }
+      const abs = resolve(root, rel);
+      if (abs !== root && !abs.startsWith(root + sep)) {
+        res.status(400).json({ error: "path is outside the workspace" });
+        return;
+      }
+      const info = await stat(abs).catch(() => null);
+      if (!info?.isFile()) {
+        res.status(404).json({ error: "file not found" });
+        return;
+      }
+      const ext = extname(abs).toLowerCase();
+      const name = basename(abs).replace(/["\\\r\n]/g, "_");
+      res.setHeader("content-type", MIME[ext] ?? "application/octet-stream");
+      res.setHeader("cache-control", "no-store");
+      if (req.query.download) {
+        res.setHeader(
+          "content-disposition",
+          `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        );
+      } else {
+        res.setHeader("content-disposition", `inline; filename="${name}"`);
+      }
+      // The data dir can be a dotfile path (~/.mentor), which sendFile blocks by default.
+      res.sendFile(abs, { dotfiles: "allow" });
+    }),
+  );
 
   // --- uploads ---
 

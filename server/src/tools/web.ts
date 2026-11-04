@@ -95,6 +95,12 @@ export function buildWebTools() {
       });
       const contentType = res.headers.get("content-type") ?? "";
       const body = await res.text();
+      const title = contentType.includes("html")
+        ? /<title[^>]*>([\s\S]*?)<\/title>/i
+            .exec(body)?.[1]
+            ?.replace(/\s+/g, " ")
+            .trim()
+        : undefined;
       let text = body;
       if (contentType.includes("html")) {
         const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
@@ -103,14 +109,23 @@ export function buildWebTools() {
       }
       const limit = params.maxChars ?? 20000;
       const truncated = text.length > limit;
+      const excerpt = truncated ? text.slice(0, limit) : text;
       return {
         content: [
           {
             type: "text" as const,
-            text: (truncated ? text.slice(0, limit) : text) + (truncated ? "\n\n[truncated]" : ""),
+            text: excerpt + (truncated ? "\n\n[truncated]" : ""),
           },
         ],
-        details: { url: res.url, status: res.status, contentType },
+        details: {
+          url: res.url,
+          status: res.status,
+          contentType,
+          title,
+          excerpt: excerpt.slice(0, 4000),
+          chars: text.length,
+          truncated,
+        },
       };
     },
   });
@@ -125,13 +140,22 @@ export function buildWebTools() {
       limit: Type.Optional(Type.Number({ description: "Max results, default 5" })),
     }),
     execute: async (_id: string, params: { query: string; limit?: number }) => {
+      const startedAt = Date.now();
       const results = await search(params.query, Math.min(params.limit ?? 5, 10));
       const text = results.length
         ? results
             .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
             .join("\n\n")
         : "No results.";
-      return { content: [{ type: "text" as const, text }], details: { count: results.length } };
+      return {
+        content: [{ type: "text" as const, text }],
+        details: {
+          query: params.query,
+          results,
+          total: results.length,
+          durationMs: Date.now() - startedAt,
+        },
+      };
     },
   });
 

@@ -1,0 +1,21 @@
+{
+  "appId": "com.mentor.app",
+  "appName": "Mentor",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "allowNavigation": ["*://*:*"]
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "CapacitorUpdater": {
+      "autoUpdate": "off",
+      "statsUrl": "",
+      "appReadyTimeout": 15000,
+      "responseTimeout": 30,
+      "resetWhenUpdate": true
+    }
+  }
+}
