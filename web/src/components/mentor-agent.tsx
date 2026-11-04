@@ -1447,6 +1447,12 @@ function MentorAgent({
       </Conversation>
     )
 
+  // A chip inside the composer tools card: 32 px visual to sit level with Send, with a
+  // pseudo element that grows the touch target to 44 px without moving the card.
+  const toolButton =
+    "relative size-8 rounded-chatcn-sm pointer-coarse:size-8 " +
+    "after:absolute after:-inset-1.5 after:content-[''] pointer-fine:after:hidden"
+
   const composer = (
     <div
       data-slot="coding-agent-composer"
@@ -1540,24 +1546,39 @@ function MentorAgent({
           ))}
         </PromptInputAttachments>
         <PromptInputTextarea placeholder={busy ? queuePlaceholder : placeholder} />
-        <PromptInputToolbar>
-          <PromptInputTools>
-            <PromptInputAttachButton tooltip="Attach a document" />
-            {canVoice ? (
-              <PromptInputButton
-                tooltip={voice === "recording" ? "Stop recording" : "Voice input"}
-                onClick={toggleVoice}
-                data-testid="voice-composer"
-                aria-label={voice === "recording" ? "Stop recording" : "Voice input"}
-                className={cn(voice === "recording" && "text-chatcn-red")}
-              >
-                {voice === "recording" ? (
-                  <MicOffIcon className="size-4" />
-                ) : (
-                  <MicIcon className="size-4" />
-                )}
-              </PromptInputButton>
-            ) : null}
+        <PromptInputToolbar className="gap-2">
+          <PromptInputTools className="min-w-0">
+            {/* Attach and voice share one small card, so they read as a set and stay on
+                the same baseline as Send. */}
+            <div
+              data-slot="composer-tools"
+              className="border-chatcn-border bg-chatcn-fill/60 shadow-chatcn-xs flex items-center gap-0.5 rounded-chatcn-md border p-0.5"
+            >
+              <PromptInputAttachButton
+                tooltip="Attach a document"
+                size="icon-sm"
+                className={toolButton}
+              />
+              {canVoice ? (
+                <>
+                  <span aria-hidden="true" className="bg-chatcn-border h-5 w-px shrink-0" />
+                  <PromptInputButton
+                    tooltip={voice === "recording" ? "Stop recording" : "Voice input"}
+                    onClick={toggleVoice}
+                    size="icon-sm"
+                    data-testid="voice-composer"
+                    aria-label={voice === "recording" ? "Stop recording" : "Voice input"}
+                    className={cn(toolButton, voice === "recording" && "text-chatcn-red")}
+                  >
+                    {voice === "recording" ? (
+                      <MicOffIcon className="size-4" />
+                    ) : (
+                      <MicIcon className="size-4" />
+                    )}
+                  </PromptInputButton>
+                </>
+              ) : null}
+            </div>
           </PromptInputTools>
           <PromptInputActions>
             <PromptInputSubmit />

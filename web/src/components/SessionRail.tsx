@@ -3,11 +3,25 @@ import type { Mentor } from "@/hooks/use-mentor";
 import {
   AudioLinesIcon,
   CalendarIcon,
+  MessageSquareIcon,
   SearchIcon,
   SquarePenIcon,
   Trash2Icon,
   XIcon,
 } from "@/lib/chatcn-icons";
+import {
+  Sidebar,
+  SidebarAction,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarSeparator,
+} from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
 function timeAgo(ts: number): string {
@@ -25,16 +39,16 @@ const PREVIEW_COUNT = 8;
 
 /**
  * Rows that are places we do not have yet. They are not buttons on purpose: nothing to tap, and
- * no "coming soon" label either.
+ * no "coming soon" label either, so they read as quiet labels rather than dead controls.
  */
 function InertRow({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
     <div
       data-slot={`nav-${label.toLowerCase()}`}
       aria-hidden="true"
-      className="chatcn-text-14 text-chatcn-fg-muted flex h-10 items-center gap-3 px-2 select-none"
+      className="text-sidebar-foreground/40 flex h-8 items-center gap-2.5 rounded-md px-2 text-sm select-none [&_svg]:size-4 [&_svg]:shrink-0"
     >
-      <span className="text-chatcn-fg-subtle shrink-0 [&_svg]:size-5">{icon}</span>
+      <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
     </div>
   );
@@ -64,12 +78,17 @@ export function SessionRail({
   const visible = query.trim() || showAll ? filtered : filtered.slice(0, PREVIEW_COUNT);
   const hiddenCount = filtered.length - visible.length;
 
+  const closeSearch = () => {
+    setSearching(false);
+    setQuery("");
+  };
+
   return (
-    <div className="bg-chatcn-bg-subtle border-chatcn-border flex h-full min-h-0 flex-col border-e">
-      <div className="flex h-14 shrink-0 items-center gap-1 px-2">
+    <Sidebar className="border-sidebar-border border-e">
+      <SidebarHeader>
         {searching ? (
-          <>
-            <SearchIcon className="text-chatcn-fg-subtle size-4 shrink-0" />
+          <div className="border-sidebar-border bg-sidebar-accent/60 focus-within:border-sidebar-ring/70 flex h-10 items-center gap-2 rounded-lg border px-2.5 transition-colors">
+            <SearchIcon className="text-sidebar-foreground/50 size-4 shrink-0" />
             <input
               data-testid="chat-search"
               autoFocus
@@ -77,126 +96,134 @@ export function SessionRail({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search chats"
               aria-label="Search chats"
-              className="chatcn-text-14 text-chatcn-fg placeholder:text-chatcn-fg-subtle min-w-0 flex-1 bg-transparent outline-none"
+              className="text-sidebar-foreground placeholder:text-sidebar-foreground/40 min-w-0 flex-1 bg-transparent text-sm outline-none"
             />
-            <button
-              type="button"
-              onClick={() => {
-                setSearching(false);
-                setQuery("");
-              }}
-              aria-label="Close search"
-              className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-subtle hover:bg-chatcn-fill-hover hover:text-chatcn-fg flex size-8 shrink-0 items-center justify-center transition-colors"
-            >
-              <XIcon className="size-4" />
-            </button>
-          </>
+            <SidebarAction onClick={closeSearch} aria-label="Close search" className="size-6">
+              <XIcon className="size-3.5" />
+            </SidebarAction>
+          </div>
         ) : (
-          <>
-            <span className="chatcn-text-16 text-chatcn-fg min-w-0 flex-1 truncate px-1 font-semibold tracking-tight">
-              Mentor
+          <div className="flex items-center gap-2.5 px-1 py-0.5">
+            <span className="from-chatcn-fg to-chatcn-fg-subtle text-chatcn-bg shadow-chatcn-xs flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-b">
+              <span className="text-[0.9375rem] font-semibold tracking-tight">M</span>
             </span>
-            <button
-              type="button"
+            <span className="min-w-0 flex-1">
+              <span className="text-sidebar-foreground block truncate text-sm font-semibold tracking-tight">
+                Mentor
+              </span>
+              <span className="text-sidebar-foreground/45 block truncate text-xs">
+                Your study tutor
+              </span>
+            </span>
+            <SidebarAction
               onClick={() => setSearching(true)}
               aria-label="Search chats"
               title="Search chats"
-              className="chatcn-focus rounded-chatcn-md text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg flex size-9 items-center justify-center transition-colors"
             >
-              <SearchIcon className="size-5" />
-            </button>
+              <SearchIcon className="size-4" />
+            </SidebarAction>
             {onClose ? (
-              <button
-                type="button"
+              <SidebarAction
                 onClick={onClose}
                 aria-label="Close menu"
-                className="chatcn-focus rounded-chatcn-md text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg flex size-9 items-center justify-center transition-colors lg:hidden"
+                title="Close menu"
+                className="lg:hidden"
               >
-                <XIcon className="size-5" />
-              </button>
+                <XIcon className="size-4" />
+              </SidebarAction>
             ) : null}
-          </>
+          </div>
         )}
-      </div>
+      </SidebarHeader>
 
-      <div className="shrink-0 px-2">
-        <InertRow icon={<SquarePenIcon />} label="Projects" />
-        <InertRow icon={<CalendarIcon />} label="Scheduled" />
-      </div>
+      <SidebarSeparator />
 
-      <div className="border-chatcn-border my-2 shrink-0 border-t" />
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <InertRow icon={<SquarePenIcon />} label="Projects" />
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <InertRow icon={<CalendarIcon />} label="Scheduled" />
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
 
-      <div className="chatcn-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        {visible.length === 0 ? (
-          <p className="chatcn-text-13 text-chatcn-fg-subtle px-2 py-3">
-            {query.trim() ? "No chats match." : "No chats yet."}
-          </p>
-        ) : null}
-        {visible.map((session) => {
-          const active = session.id === mentor.activeId;
-          return (
-            <div
-              key={session.id}
-              onMouseEnter={() => setHovered(session.id)}
-              onMouseLeave={() => setHovered(null)}
-              className={cn(
-                "group flex min-w-0 items-center rounded-chatcn-md pe-1 transition-colors",
-                active ? "bg-chatcn-fill" : "hover:bg-chatcn-fill-hover",
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  mentor.openSession(session.id);
-                  onClose?.();
-                }}
-                className="flex min-w-0 flex-1 items-center gap-2 py-2.5 ps-2.5 text-start"
-                title={session.title}
-              >
-                <span
-                  className={cn(
-                    "chatcn-text-14 min-w-0 flex-1 truncate",
-                    active ? "text-chatcn-fg" : "text-chatcn-fg-muted",
-                  )}
+        <SidebarGroup className="min-h-0 flex-1">
+          <SidebarGroupLabel className="justify-between">
+            <span>Chats</span>
+            {filtered.length ? (
+              <span className="text-sidebar-foreground/35 tabular-nums">{filtered.length}</span>
+            ) : null}
+          </SidebarGroupLabel>
+          <SidebarMenu>
+            {visible.length === 0 ? (
+              <p className="text-sidebar-foreground/45 px-2 py-3 text-[0.8125rem]">
+                {query.trim() ? "No chats match." : "No chats yet."}
+              </p>
+            ) : null}
+            {visible.map((session) => {
+              const active = session.id === mentor.activeId;
+              const isHovered = hovered === session.id;
+              return (
+                <SidebarMenuItem
+                  key={session.id}
+                  onMouseEnter={() => setHovered(session.id)}
+                  onMouseLeave={() => setHovered(null)}
                 >
-                  {session.title}
-                </span>
-                <span
-                  className={cn(
-                    "chatcn-text-12 text-chatcn-fg-subtle shrink-0 tabular-nums",
-                    hovered === session.id && "hidden",
-                  )}
+                  <SidebarMenuButton
+                    active={active}
+                    onClick={() => {
+                      mentor.openSession(session.id);
+                      onClose?.();
+                    }}
+                    title={session.title}
+                    className="pe-8"
+                  >
+                    <MessageSquareIcon
+                      className={cn("size-4", active ? "opacity-80" : "opacity-45")}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                    <span
+                      className={cn(
+                        "text-sidebar-foreground/40 shrink-0 text-xs tabular-nums",
+                        isHovered && "hidden",
+                      )}
+                    >
+                      {timeAgo(session.updatedAt)}
+                    </span>
+                  </SidebarMenuButton>
+                  {isHovered ? (
+                    <SidebarAction
+                      onClick={() => void mentor.deleteSession(session.id)}
+                      title="Delete chat"
+                      aria-label="Delete chat"
+                      className="text-sidebar-foreground/50 hover:text-chatcn-red absolute end-1 top-1/2 size-7 -translate-y-1/2"
+                    >
+                      <Trash2Icon className="size-4" />
+                    </SidebarAction>
+                  ) : null}
+                </SidebarMenuItem>
+              );
+            })}
+            {hiddenCount > 0 ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => setShowAll(true)}
+                  data-testid="see-all-chats"
+                  className="text-sidebar-foreground/55 justify-center font-medium"
                 >
-                  {timeAgo(session.updatedAt)}
-                </span>
-              </button>
-              {hovered === session.id ? (
-                <button
-                  type="button"
-                  onClick={() => void mentor.deleteSession(session.id)}
-                  title="Delete chat"
-                  aria-label="Delete chat"
-                  className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-subtle hover:text-chatcn-red flex size-7 shrink-0 items-center justify-center"
-                >
-                  <Trash2Icon className="size-4" />
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
-        {hiddenCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => setShowAll(true)}
-            data-testid="see-all-chats"
-            className="chatcn-focus rounded-chatcn-md text-chatcn-fg-subtle hover:bg-chatcn-fill-hover hover:text-chatcn-fg chatcn-text-14 flex w-full items-center px-2.5 py-2.5 text-start transition-colors"
-          >
-            See all...
-          </button>
-        ) : null}
-      </div>
+                  See all {filtered.length} chats
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
 
-      <div className="border-chatcn-border flex shrink-0 items-center gap-2 border-t px-2 py-3">
+      <SidebarFooter className="border-sidebar-border border-t">
         <button
           type="button"
           onClick={() => {
@@ -204,10 +231,10 @@ export function SessionRail({
             onClose?.();
           }}
           data-testid="new-chat"
-          className="chatcn-focus bg-chatcn-primary text-chatcn-primary-fg hover:bg-chatcn-primary-hover chatcn-text-14 flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full px-4 font-medium transition-colors active:scale-[0.99]"
+          className="chatcn-focus bg-chatcn-fg text-chatcn-bg hover:bg-chatcn-primary-hover flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors active:scale-[0.99]"
         >
-          <SquarePenIcon className="size-5" />
-          Chat
+          <SquarePenIcon className="size-4" />
+          New chat
         </button>
         {onVoice ? (
           <button
@@ -216,12 +243,12 @@ export function SessionRail({
             aria-label="Voice chat"
             title="Voice chat"
             data-testid="voice-chat"
-            className="chatcn-focus bg-chatcn-fill text-chatcn-fg hover:bg-chatcn-fill-hover border-chatcn-border flex size-11 shrink-0 items-center justify-center rounded-full border transition-colors active:scale-95"
+            className="chatcn-focus bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent/70 border-sidebar-border flex size-10 shrink-0 items-center justify-center rounded-lg border transition-colors active:scale-95"
           >
             <AudioLinesIcon className="size-5" />
           </button>
         ) : null}
-      </div>
-    </div>
+      </SidebarFooter>
+    </Sidebar>
   );
 }
