@@ -605,16 +605,9 @@ const AgentMessage = React.memo(function AgentMessage({
 
   if (message.role !== "assistant") {
     return (
-      <Message
-        from={message.role}
-        layout="flat"
-        latest={latest}
-        className="items-center"
-      >
-        <MessageContent className="chatcn-text-15 bg-chatcn-fill rounded-chatcn-xl w-fit max-w-[85%] px-4 py-2.5 text-start">
-          {text}
-        </MessageContent>
-        <MessageActions className="ms-0 justify-center">
+      <Message from={message.role} latest={latest}>
+        <MessageContent>{text}</MessageContent>
+        <MessageActions>
           <MessageActionCopy value={text} label="Copy message" />
           {fork}
         </MessageActions>
@@ -628,7 +621,6 @@ const AgentMessage = React.memo(function AgentMessage({
       state={streaming ? "streaming" : stopped ? "stopped" : "done"}
       latest={latest}
       announce={false}
-      className="items-center"
     >
       <MessageContent>
         <GroupContext.Provider value={groups}>
@@ -644,7 +636,7 @@ const AgentMessage = React.memo(function AgentMessage({
       </MessageContent>
       <MessageStatus />
       {!streaming && !waiting && text ? (
-        <MessageActions className="justify-center">
+        <MessageActions>
           <MessageActionCopy value={text} label="Copy response" />
           {fork}
         </MessageActions>

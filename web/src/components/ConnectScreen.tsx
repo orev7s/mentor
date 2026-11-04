@@ -16,7 +16,7 @@ export function ConnectScreen({ mentor }: { mentor: Mentor }) {
       className="bg-chatcn-bg text-chatcn-fg flex min-h-dvh flex-col items-center justify-center px-5"
       style={{
         paddingTop: "calc(var(--safe-top) + 2.5rem)",
-        paddingBottom: "calc(max(var(--safe-bottom), var(--keyboard-inset)) + 2.5rem)",
+        paddingBottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px) + 2.5rem)",
         paddingLeft: "calc(var(--safe-left) + 1.25rem)",
         paddingRight: "calc(var(--safe-right) + 1.25rem)",
       }}

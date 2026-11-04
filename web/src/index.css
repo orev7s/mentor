@@ -555,7 +555,6 @@
     --safe-bottom: max(var(--safe-bottom-native, 0px), env(safe-area-inset-bottom, 0px));
     --safe-left: max(var(--safe-left-native, 0px), env(safe-area-inset-left, 0px));
     --safe-right: max(var(--safe-right-native, 0px), env(safe-area-inset-right, 0px));
-    --keyboard-inset: var(--keyboard-inset-native, 0px);
   }
   * {
     @apply border-border outline-ring/50;

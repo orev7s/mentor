@@ -27,7 +27,7 @@ export function DownloadToast({
   return (
     <div
       className="pointer-events-none fixed inset-x-0 z-[60] flex justify-center px-4"
-      style={{ bottom: "calc(max(var(--safe-bottom), var(--keyboard-inset)) + 0.75rem)" }}
+      style={{ bottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px) + 0.75rem)" }}
     >
       <div
         data-slot="download-toast"

@@ -43,6 +43,7 @@ export default function App() {
   const [saved, setSaved] = useState<SavedFile | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const todos = useMemo(() => mergedTodos(mentor.messages), [mentor.messages]);
 
   const clearTimers = () => {
@@ -53,6 +54,36 @@ export default function App() {
   };
 
   useEffect(() => clearTimers, []);
+
+  /**
+   * Android and iOS shrink the visual viewport when the keyboard opens, but
+   * they do not always shrink the layout viewport with it. Compare the two and
+   * only pad by the difference, so the composer never floats above a blank box.
+   */
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => {
+      const shell =
+        shellRef.current?.getBoundingClientRect().height ??
+        document.getElementById("root")?.getBoundingClientRect().height ??
+        0;
+      const overlap = Math.max(0, shell - viewport.height - viewport.offsetTop);
+      document.documentElement.style.setProperty(
+        "--keyboard-overlap",
+        overlap > 60 ? `${Math.round(overlap)}px` : "0px",
+      );
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     if (!saved) return;
@@ -117,10 +148,11 @@ export default function App() {
 
   return (
     <div
+      ref={shellRef}
       className="bg-chatcn-bg text-chatcn-fg flex h-dvh min-h-0 overflow-hidden"
       style={{
         paddingTop: "var(--safe-top)",
-        paddingBottom: "max(var(--safe-bottom), var(--keyboard-inset))",
+        paddingBottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px))",
         paddingLeft: "var(--safe-left)",
         paddingRight: "var(--safe-right)",
       }}
@@ -141,7 +173,7 @@ export default function App() {
         }
         style={{
           top: "var(--safe-top)",
-          bottom: "max(var(--safe-bottom), var(--keyboard-inset))",
+          bottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px))",
         }}
       >
         <SessionRail mentor={mentor} onClose={() => setRailOpen(false)} />

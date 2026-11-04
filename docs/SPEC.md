@@ -145,11 +145,13 @@ cite sources, save deliverables in the workspace so Files shows them).
   real name and extension, so a PDF lands as `report.pdf` in Downloads. The
   client polls the download and shows a toast with Open when it is ready. In a
   plain browser a normal `<a download>` is used.
-- Android 15 and later run apps edge to edge. `MainActivity` turns that into
-  `--safe-top`, `--safe-bottom` and `--keyboard-inset` CSS variables, and the
-  app shell pads the header, the drawer and the composer with them. The
-  activity uses `adjustNothing` so the keyboard never pans the page on top of
-  its own padding.
+- Android 15 and later run apps edge to edge. `MainActivity` turns the system
+  bars into `--safe-top`, `--safe-bottom` and side inset variables, and the app
+  shell pads the header, the drawer and the composer with them. The keyboard is
+  handled in the web layer: it compares the shell height with
+  `visualViewport.height` and pads only by the difference, so the composer sits
+  on the keyboard without a blank gap. The activity uses `adjustNothing`, which
+  leaves that one mechanism in charge.
 - `web/src/lib/updater.ts` checks GitHub releases on launch (native only),
   downloads a newer web bundle and stages it for the next launch. See
   `docs/UPDATES.md`.
