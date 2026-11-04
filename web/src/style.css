@@ -1,15 +1,17 @@
 @import "tailwindcss";
 
 @theme {
-  --color-base: #09090b;
-  --color-surface: #0e0e11;
-  --color-elevated: #151518;
-  --color-raised: #1c1c21;
-  --color-line: #26262d;
+  --color-base: #0a0a0c;
+  --color-surface: #101013;
+  --color-card: #141418;
+  --color-elevated: #17171b;
+  --color-raised: #1d1d23;
+  --color-fill: #1c1c21;
+  --color-line: #26262c;
   --color-line-soft: #1a1a1f;
-  --color-ink: #f2f2f3;
-  --color-muted: #a0a0aa;
-  --color-faint: #6c6c78;
+  --color-ink: #ededee;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
   --color-accent: #7c74ff;
   --color-accent-soft: #1b1a30;
   --color-success: #4ade80;
@@ -304,4 +306,30 @@ button {
 }
 .sheet-up {
   animation: sheet-up 220ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.shimmer-text {
+  background: linear-gradient(90deg, #5f5f6a 0%, #ededee 50%, #5f5f6a 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.fade-in {
+  animation: fade-in 200ms ease-out;
 }

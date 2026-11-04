@@ -91,9 +91,6 @@ async function removeCustom(id: string) {
           <div class="space-y-2.5">
             <div v-for="preset in state.presets" :key="preset.id" class="rounded-xl border border-line bg-surface p-3.5">
               <div class="flex items-center gap-2">
-                <span class="grid h-7 w-7 place-items-center rounded-lg border border-line bg-elevated text-[11px] uppercase text-muted">
-                  {{ preset.name.slice(0, 2) }}
-                </span>
                 <span class="text-[14px] font-medium text-ink">{{ preset.name }}</span>
                 <span v-if="preset.free" class="rounded-full border border-line px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-success">free</span>
                 <div class="flex-1"></div>

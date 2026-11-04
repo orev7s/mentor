@@ -57,6 +57,7 @@ function toWireEvent(event: AgentSessionEvent): unknown {
         toolName: raw.toolName,
         isError: raw.isError,
         durationMs: raw.durationMs,
+        result: raw.result,
       };
     case "turn_end":
       return { type: event.type, message: raw.message, toolResults: raw.toolResults };

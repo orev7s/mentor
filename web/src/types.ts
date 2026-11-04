@@ -53,8 +53,17 @@ export interface ContentBlock {
   type: "text" | "thinking" | "toolCall";
   text?: string;
   thinking?: string;
+  id?: string;
   name?: string;
   arguments?: unknown;
+}
+
+export interface ToolCallState {
+  name: string;
+  args: unknown;
+  state: "LOADING" | "COMPLETED" | "ERROR";
+  result?: unknown;
+  durationMs?: number;
 }
 
 export interface ChatMessage {

@@ -15,7 +15,6 @@ function timeAgo(ts: number): string {
 <template>
   <div class="flex h-full flex-col">
     <div class="flex items-center gap-2 px-4 pb-2 pt-4">
-      <div class="grid h-6 w-6 place-items-center rounded-lg bg-gradient-to-br from-accent to-[#3b2f8f] text-[11px] font-semibold text-white">M</div>
       <span class="text-[15px] font-semibold tracking-tight text-ink">Mentor</span>
       <div class="flex-1"></div>
       <button
@@ -58,16 +57,5 @@ function timeAgo(ts: number): string {
 
       <p v-if="!state.sessions.length" class="px-3 py-2 text-[12px] text-faint">No chats yet.</p>
     </div>
-
-    <button
-      class="flex items-center gap-2 border-t border-line-soft px-4 py-3 text-[12px] text-faint transition hover:text-muted"
-      @click="state.settingsOpen = true"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 11 4.6a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 11a2 2 0 1 1 0 4z" />
-      </svg>
-      Providers & settings
-    </button>
   </div>
 </template>

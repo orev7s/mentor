@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 import { ApiClient } from "./api";
-import type { ChatMessage, ContentBlock, CustomProvider, ModelSummary, ProviderPreset, SessionMeta } from "./types";
+import type { ChatMessage, ContentBlock, CustomProvider, ModelSummary, ProviderPreset, SessionMeta, ToolCallState } from "./types";
 
 const LS_KEY = "mentor.connection";
 const PREFS_KEY = "mentor.prefs";
@@ -26,6 +26,8 @@ interface State {
   settingsOpen: boolean;
   effortOpen: boolean;
   attachments: Attachment[];
+  loadingSession: boolean;
+  toolCalls: Record<string, ToolCallState>;
 }
 
 export interface Attachment {
@@ -55,6 +57,8 @@ export const state = reactive<State>({
   settingsOpen: false,
   effortOpen: false,
   attachments: [],
+  loadingSession: false,
+  toolCalls: {},
 });
 
 let client: ApiClient | null = null;
@@ -230,18 +234,28 @@ export function closeStream(): void {
   es = null;
 }
 
+let loadingTimer: ReturnType<typeof setTimeout> | undefined;
+
 export async function openSession(id: string): Promise<void> {
   if (!client) return;
   state.activeSessionId = id;
   state.messages = [];
   state.streamText = "";
   state.busy = false;
+  state.toolCalls = {};
+  state.loadingSession = true;
   closeStream();
+  if (loadingTimer) clearTimeout(loadingTimer);
+  loadingTimer = setTimeout(() => {
+    state.loadingSession = false;
+  }, 10000);
   const activeClient = client;
   es = new EventSource(activeClient.eventsUrl(id));
   es.addEventListener("snapshot", (event) => {
     const data = JSON.parse((event as MessageEvent).data) as { messages?: unknown[] };
     state.messages = (data.messages ?? []).map(toChatMessage).filter((m) => m.role !== "system");
+    state.loadingSession = false;
+    if (loadingTimer) clearTimeout(loadingTimer);
   });
   es.onmessage = (event) => handleEvent(JSON.parse(event.data));
 }
@@ -305,6 +319,7 @@ export async function attachFile(file: File): Promise<Attachment | null> {
 function handleEvent(event: Record<string, unknown>): void {
   switch (event.type) {
     case "message_start": {
+      state.loadingSession = false;
       const message = toChatMessage(event.message);
       if (message.role === "user") state.messages.push(message);
       if (message.role === "assistant") state.streamText = "";
@@ -324,6 +339,30 @@ function handleEvent(event: Record<string, unknown>): void {
       }
       break;
     }
+    case "tool_execution_start": {
+      const id = String(event.toolCallId ?? "");
+      state.toolCalls[id] = {
+        name: String(event.toolName ?? "tool"),
+        args: event.args,
+        state: "LOADING",
+      };
+      break;
+    }
+    case "tool_execution_end": {
+      const id = String(event.toolCallId ?? "");
+      const existing: ToolCallState = state.toolCalls[id] ?? {
+        name: String(event.toolName ?? "tool"),
+        args: {},
+        state: "LOADING",
+      };
+      state.toolCalls[id] = {
+        ...existing,
+        state: event.isError ? "ERROR" : "COMPLETED",
+        result: event.result,
+        durationMs: typeof event.durationMs === "number" ? event.durationMs : existing.durationMs,
+      };
+      break;
+    }
     case "agent_settled":
       state.busy = false;
       void refreshSessions();
@@ -331,6 +370,7 @@ function handleEvent(event: Record<string, unknown>): void {
     case "error":
       state.error = typeof event.message === "string" ? event.message : "error";
       state.busy = false;
+      state.loadingSession = false;
       break;
   }
 }

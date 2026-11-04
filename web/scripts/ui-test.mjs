@@ -7,7 +7,7 @@ const CHROME = join(
   homedir(),
   ".cache/ms-playwright/chromium-1248/chrome-linux64/chrome",
 );
-const WEB = process.env.WEB_URL ?? "http://127.0.0.1:4173";
+const WEB = process.env.WEB_URL ?? "http://127.0.0.1:8790";
 const SERVER = process.env.SERVER_URL ?? "http://127.0.0.1:8790";
 const DATA_DIR = process.env.MENTOR_DATA_DIR ?? join(homedir(), ".mentor-dev");
 const SHOTS = "/home/ubuntu/projects/mentor/docs/screenshots";

@@ -14,7 +14,6 @@ async function submit() {
   <div class="flex h-full items-center justify-center bg-base p-6">
     <div class="w-full max-w-sm">
       <div class="mb-6 flex flex-col items-center text-center">
-        <div class="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-accent to-[#3b2f8f] text-xl font-semibold text-white">M</div>
         <h1 class="text-xl font-semibold tracking-tight text-ink">Mentor</h1>
         <p class="mt-1 text-[13px] text-faint">Connect to your agent server.</p>
       </div>

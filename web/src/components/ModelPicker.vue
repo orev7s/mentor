@@ -78,9 +78,6 @@ function providerLabel(id: string): string {
             class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-raised"
             @click="choose(m)"
           >
-            <span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-line bg-surface text-[11px] uppercase text-muted">
-              {{ m.name.slice(0, 2) }}
-            </span>
             <span class="min-w-0 flex-1">
               <span class="block truncate text-[13.5px] text-ink">{{ m.name }}</span>
               <span class="block truncate font-mono text-[11px] text-faint">{{ m.id }}</span>
