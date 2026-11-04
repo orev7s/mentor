@@ -238,6 +238,37 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
   );
 
   app.post(
+    "/sessions/:id/answers",
+    asyncHandler(async (req, res) => {
+      const body = req.body ?? {};
+      const toolCallId = typeof body.toolCallId === "string" ? body.toolCallId : "";
+      const raw = Array.isArray(body.answers) ? (body.answers as unknown[]) : [];
+      const answers = raw.flatMap((item: unknown) => {
+        if (!item || typeof item !== "object") return [];
+        const value = item as { question?: unknown; selected?: unknown };
+        return [
+          {
+            question: typeof value.question === "string" ? value.question : "",
+            selected: Array.isArray(value.selected)
+              ? value.selected.filter((entry: unknown): entry is string => typeof entry === "string")
+              : [],
+          },
+        ];
+      });
+      if (!toolCallId || !answers.length) {
+        res.status(400).json({ error: "toolCallId and answers are required" });
+        return;
+      }
+      const session = await manager.get(String(req.params.id));
+      if (!session.answerQuestions(toolCallId, answers)) {
+        res.status(409).json({ error: "This question is no longer waiting for an answer." });
+        return;
+      }
+      res.json({ ok: true });
+    }),
+  );
+
+  app.post(
     "/sessions/:id/abort",
     asyncHandler(async (req, res) => {
       const session = await manager.get(String(req.params.id));

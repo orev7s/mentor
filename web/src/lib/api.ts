@@ -181,6 +181,17 @@ export class ApiClient {
     return this.request<{ ok: boolean }>("POST", `/sessions/${id}/abort`);
   }
 
+  answerQuestions(
+    id: string,
+    toolCallId: string,
+    answers: { question: string; selected: string[] }[],
+  ) {
+    return this.request<{ ok: boolean }>("POST", `/sessions/${id}/answers`, {
+      toolCallId,
+      answers,
+    });
+  }
+
   files(id: string) {
     return this.request<{ files: WorkspaceFile[] }>("GET", `/sessions/${id}/files`);
   }

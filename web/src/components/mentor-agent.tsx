@@ -2,30 +2,32 @@
 
 import * as React from "react"
 import { ChangedFiles } from "@/components/ui/chatcn/changed-files"
-import { ContextMeter, type ContextMeterProps } from "@/components/ui/chatcn/context-meter"
 import {
   Conversation,
   ConversationContent,
   useConversation,
 } from "@/components/ui/chatcn/conversation"
-import { DiffStat, DiffViewer } from "@/components/ui/chatcn/diff-viewer"
+import { DiffViewer } from "@/components/ui/chatcn/diff-viewer"
 import { EmptyState } from "@/components/ui/chatcn/empty-state"
 import { Markdown } from "@/components/ui/chatcn/markdown"
+import {
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuShortcut,
+  MenuTrigger,
+} from "@/components/ui/chatcn/menu"
 import { Message, MessageContent, MessageStatus } from "@/components/ui/chatcn/message"
 import { MessageAction, MessageActionCopy, MessageActions } from "@/components/ui/chatcn/message-actions"
 import { type MessagePartComponents, MessageParts } from "@/components/ui/chatcn/message-parts"
-import {
-  permissionModes as defaultPermissionModes,
-  nextPermissionMode,
-  PermissionMode,
-  type PermissionModeOption,
-} from "@/components/ui/chatcn/permission-mode"
 import {
   PromptInput,
   PromptInputActions,
   PromptInputAttachButton,
   PromptInputAttachments,
-  PromptInputButton,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
@@ -33,8 +35,6 @@ import {
 } from "@/components/ui/chatcn/prompt-input"
 import { type QueuedMessage, QueuedMessages } from "@/components/ui/chatcn/queued-messages"
 import { Reasoning, reasoningPropsFromPart } from "@/components/ui/chatcn/reasoning"
-import { ResizableGroup, ResizableHandle, ResizablePanel } from "@/components/ui/chatcn/resizable"
-import { RunStatus, type RunStatusValue } from "@/components/ui/chatcn/run-status"
 import { ScrollToBottom } from "@/components/ui/chatcn/scroll-to-bottom"
 import { Spinner } from "@/components/ui/chatcn/spinner"
 import { Terminal } from "@/components/ui/chatcn/terminal"
@@ -57,25 +57,25 @@ import { toolWebSearchRenderers } from "@/components/ui/chatcn/tool-web-search"
 import { TooltipProvider } from "@/components/ui/chatcn/tooltip"
 import { Trace, TraceStep } from "@/components/ui/chatcn/trace"
 import { TraceGroup } from "@/components/ui/chatcn/trace-group"
-import { type DiffFile, diffStats, diffText, parsePatch } from "@/lib/chatcn-diff"
+import { type DiffFile, diffText, parsePatch } from "@/lib/chatcn-diff"
 import {
   ArtifactIcon,
   ChevronDownIcon,
+  CircleCheckIcon,
   DiffIcon,
   DownloadIcon,
+  EllipsisIcon,
   FileCodeIcon,
   FileIcon,
   FileTextIcon,
   FolderIcon,
-  GitBranchIcon,
   GitForkIcon,
   ImageIcon,
   ListChecksIcon,
-  MessageSquareIcon,
   ModelIcon,
-  PanelRightIcon,
   RefreshCwIcon,
   SettingsIcon,
+  SquarePenIcon,
   SquareTerminalIcon,
   XIcon,
 } from "@/lib/chatcn-icons"
@@ -131,11 +131,17 @@ interface CodingWorkspace {
   activity?: { key: string; tab: CodingWorkspaceTab; path?: string }
 }
 
-/** Context window numbers for the meter in the composer. */
-type CodingAgentContext = Pick<
-  ContextMeterProps,
-  "limit" | "used" | "breakdown" | "model" | "compacted" | "onCompact" | "warnAt"
->
+/** A multiple-choice question the agent sends through `ask_student`. */
+interface AskQuestionInput {
+  question: string
+  options: string[]
+  allowMultiple?: boolean
+}
+
+interface AskAnswerInput {
+  question: string
+  selected: string[]
+}
 
 interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   /** The thread, in the chatcn contract. AI SDK `UIMessage` works as is. */
@@ -145,28 +151,16 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   /** send, stop, approve and deny. Missing ones hide their controls. */
   actions?: ChatcnActions
 
-  /** Header title. Defaults to the first line of the first user message. */
-  title?: React.ReactNode
-  /** Git branch the agent works on, shown in the header. */
-  branch?: string
-  /** Model name, shown in the header and the context meter. */
-  model?: string
-  /** Extra controls at the end of the header. */
-  headerActions?: React.ReactNode
+  /** A control at the top-left, usually the chat list button. */
+  leadingAction?: React.ReactNode
+  /** Opens a fresh chat from the floating top bar. */
+  onNewChat?: () => void
 
-  /**
-   * Show the files/changes/terminal pane beside the chat. Controlled or uncontrolled.
-   * On tablet and desktop the header carries a button that folds it away.
-   */
-  workspaceOpen?: boolean
-  defaultWorkspaceOpen?: boolean
-  onWorkspaceOpenChange?: (open: boolean) => void
-
-  /** Model name shown in the composer chip. */
+  /** Model name shown in the overflow menu. */
   composerModel?: string
-  /** Opens the model picker from the composer. */
+  /** Opens the model picker from the overflow menu. */
   onOpenModels?: () => void
-  /** Opens providers and settings from the composer. */
+  /** Opens providers and settings from the overflow menu. */
   onOpenSettings?: () => void
 
   /** Override the derived workspace. Each key replaces only its own part. */
@@ -178,21 +172,6 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   workspaceTab?: CodingWorkspaceTab
   defaultWorkspaceTab?: CodingWorkspaceTab
   onWorkspaceTabChange?: (tab: CodingWorkspaceTab) => void
-  /**
-   * Move the workspace to whatever the agent touches: a streaming edit opens Changes on that
-   * file, a command opens Terminal. Picking a tab or file yourself pauses it until the next
-   * message you send. Defaults to true.
-   */
-  followActivity?: boolean
-
-  /** Permission modes for the composer. Shift+Tab in the message field cycles them. */
-  permissionModes?: PermissionModeOption[]
-  permissionMode?: string
-  defaultPermissionMode?: string
-  onPermissionModeChange?: (mode: string) => void
-
-  /** Context window usage. No meter without it. */
-  context?: CodingAgentContext
 
   /**
    * Messages sent while the agent works wait here and go out, joined, when the run ends.
@@ -224,14 +203,18 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   onDownloadFile?: (path: string) => void
   onRefreshFiles?: () => void
 
+  /** Send the student's answers back to a waiting `ask_student` call. */
+  onAnswerQuestions?: (
+    toolCallId: string,
+    answers: AskAnswerInput[],
+  ) => void | Promise<void>
+
   /** Starter prompts on the first screen. Up to four. */
   suggestions?: { label: string; prompt?: string }[]
   onSuggestion?: (prompt: string) => void
 
   /** Fill the viewport. Otherwise the block fills its parent: give the parent a height. */
   fullHeight?: boolean
-  /** Container width in px at which the two panes sit side by side. Defaults to 900. */
-  splitAt?: number
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -428,6 +411,177 @@ function ToolTodoWritePart(props: ToolRendererProps) {
   )
 }
 
+/**
+ * The agent's multiple-choice questions. The tool call stays open while the
+ * student picks answers; sending them resolves the waiting tool on the server
+ * and the agent carries on in the same run.
+ */
+function ToolAskStudentPart(props: ToolRendererProps) {
+  const { onAnswerQuestions } = React.useContext(PartContext)
+  const input = record(props.part.input)
+  const intro = str(input, "intro")
+  const rawQuestions = Array.isArray(input.questions) ? input.questions : []
+  const questions: AskQuestionInput[] = rawQuestions.flatMap((raw) => {
+    const item = record(raw)
+    const question = str(item, "question")
+    const options = Array.isArray(item.options)
+      ? item.options.filter((option): option is string => typeof option === "string")
+      : []
+    if (!question || options.length < 2) return []
+    return [{ question, options, allowMultiple: item.allowMultiple === true }]
+  })
+
+  const output = record(props.part.output)
+  const saved = Array.isArray(output.answers)
+    ? (output.answers as AskAnswerInput[]).filter((answer) => Array.isArray(answer?.selected))
+    : null
+
+  const [selected, setSelected] = React.useState<Record<number, string[]>>({})
+  const [sent, setSent] = React.useState(false)
+  const [sending, setSending] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  if (!questions.length) return null
+
+  const chosen = (index: number) =>
+    saved?.[index]?.selected ?? selected[index] ?? []
+  const answered = questions.filter((_, index) => chosen(index).length > 0).length
+  const closed = Boolean(saved) || sent || isTerminalToolState(props.part.state)
+  const ready = answered === questions.length && Boolean(onAnswerQuestions)
+
+  const pick = (index: number, option: string, multiple?: boolean) => {
+    if (closed) return
+    setError(null)
+    setSelected((prev) => {
+      const current = prev[index] ?? []
+      if (multiple) {
+        const next = current.includes(option)
+          ? current.filter((value) => value !== option)
+          : [...current, option]
+        return { ...prev, [index]: next }
+      }
+      return { ...prev, [index]: [option] }
+    })
+  }
+
+  const submit = async () => {
+    if (!ready || closed || sending) return
+    setSending(true)
+    setError(null)
+    try {
+      await onAnswerQuestions?.(
+        props.part.toolCallId,
+        questions.map((question, index) => ({
+          question: question.question,
+          selected: chosen(index),
+        })),
+      )
+      setSent(true)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not send the answers.")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div
+      data-slot="ask-student"
+      className="border-chatcn-border bg-chatcn-card shadow-chatcn-sm rounded-chatcn-lg overflow-hidden border"
+    >
+      <div className="border-chatcn-border flex items-center gap-2 border-b px-3.5 py-2.5">
+        <CircleCheckIcon className="text-chatcn-fg-muted size-4 shrink-0" />
+        <span className="chatcn-text-13 text-chatcn-fg min-w-0 flex-1 truncate font-medium">
+          {intro?.trim() || "A quick check"}
+        </span>
+        <span className="chatcn-text-12 text-chatcn-fg-subtle shrink-0 tabular-nums">
+          {answered}/{questions.length} answered
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-4 px-3.5 py-3">
+        {questions.map((question, index) => (
+          <div
+            key={`${question.question}-${index}`}
+            data-slot="ask-question"
+            className="flex flex-col gap-2"
+          >
+            <p className="chatcn-text-14 text-chatcn-fg font-medium text-pretty">
+              {index + 1}. {question.question}
+            </p>
+            <div className="flex flex-col gap-1">
+              {question.options.map((option) => {
+                const on = chosen(index).includes(option)
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    disabled={closed}
+                    aria-pressed={on}
+                    data-question={index}
+                    onClick={() => pick(index, option, question.allowMultiple)}
+                    className={cn(
+                      "chatcn-focus flex w-full min-w-0 items-center gap-2.5 rounded-chatcn-md border px-2.5 py-2 text-start transition-colors",
+                      on
+                        ? "border-chatcn-fg bg-chatcn-fill text-chatcn-fg"
+                        : "border-chatcn-border text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg",
+                      closed && "cursor-default",
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center border",
+                        question.allowMultiple ? "rounded-[4px]" : "rounded-full",
+                        on ? "border-chatcn-fg" : "border-chatcn-border-strong",
+                      )}
+                    >
+                      {on ? (
+                        question.allowMultiple ? (
+                          <CircleCheckIcon className="size-3" />
+                        ) : (
+                          <span className="bg-chatcn-fg size-1.5 rounded-full" />
+                        )
+                      ) : null}
+                    </span>
+                    <span className="chatcn-text-13 min-w-0 flex-1 text-pretty">{option}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-chatcn-border flex items-center gap-2 border-t px-3.5 py-2.5">
+        <span className="chatcn-text-12 text-chatcn-fg-subtle min-w-0 flex-1 truncate">
+          {error ??
+            (saved || sent
+              ? "Sent to your tutor"
+              : closed
+                ? "This question is closed"
+                : answered === questions.length
+                  ? "Ready to send"
+                  : "Pick one answer for each question")}
+        </span>
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={!ready || closed || sending}
+          className={cn(
+            "chatcn-focus rounded-chatcn-md chatcn-text-12 flex h-8 shrink-0 items-center px-3 font-medium transition-colors",
+            !ready || closed || sending
+              ? "bg-chatcn-fill text-chatcn-fg-subtle"
+              : "bg-chatcn-fg text-chatcn-bg hover:bg-chatcn-primary-hover",
+          )}
+        >
+          {sending ? "Sending..." : saved || sent ? "Answers sent" : "Send answers"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const defaultToolRenderers: ToolRendererMap = {
   ...toolWebSearchRenderers,
   ...toolWebFetchRenderers,
@@ -441,6 +595,7 @@ const defaultToolRenderers: ToolRendererMap = {
   TodoWrite: ToolTodoWritePart,
   write_todos: ToolTodoWritePart,
   share_file: ToolShareFilePart,
+  ask_student: ToolAskStudentPart,
 }
 
 interface ReadGroup {
@@ -480,12 +635,13 @@ function readGroups(message: ChatcnMessage) {
 
 interface PartContextValue {
   renderers: ToolRendererMap
-  /** The workspace is on screen: edits and commands stay folded in the thread, the diff and the terminal are right there. */
+  /** Keep edits and commands folded: the workspace sheet holds the full view. */
   split?: boolean
   approve?: ChatcnActions["approve"]
   deny?: ChatcnActions["deny"]
   onOpenFile?: (path: string) => void
   onDownloadFile?: (path: string) => void
+  onAnswerQuestions?: CodingAgentProps["onAnswerQuestions"]
 }
 
 const PartContext = React.createContext<PartContextValue>({ renderers: defaultToolRenderers })
@@ -649,21 +805,6 @@ const AgentMessage = React.memo(function AgentMessage({
  * Layout helpers
  * -----------------------------------------------------------------------------------------------*/
 
-/** Width of an element, measured before paint so the first frame already has the right layout. */
-function useWidth(ref: React.RefObject<HTMLElement | null>) {
-  const [width, setWidth] = React.useState<number>()
-  React.useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    // Layout width, not the transformed box, so a scaled parent never flips the layout.
-    setWidth(el.offsetWidth)
-    const observer = new ResizeObserver(() => setWidth(el.offsetWidth))
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [ref])
-  return width
-}
-
 function useControllable<T>(value: T | undefined, defaultValue: T, onChange?: (v: T) => void) {
   const [state, setState] = React.useState(defaultValue)
   const current = value ?? state
@@ -675,97 +816,6 @@ function useControllable<T>(value: T | undefined, defaultValue: T, onChange?: (v
     [value, onChange],
   )
   return [current, set] as const
-}
-
-interface TabDef<T extends string> {
-  id: T
-  label: string
-  icon: React.ReactNode
-  badge?: React.ReactNode
-}
-
-/** A segmented tab bar. Arrow keys move between tabs; the panel is labelled by its tab. */
-function TabBar<T extends string>({
-  tabs,
-  value,
-  onValueChange,
-  label,
-  idBase,
-  className,
-  end,
-}: {
-  tabs: TabDef<T>[]
-  value: T
-  onValueChange: (value: T) => void
-  label: string
-  idBase: string
-  className?: string
-  end?: React.ReactNode
-}) {
-  const refs = React.useRef<Record<string, HTMLButtonElement | null>>({})
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    const i = tabs.findIndex((t) => t.id === value)
-    let next = -1
-    if (event.key === "ArrowRight") next = (i + 1) % tabs.length
-    else if (event.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length
-    else if (event.key === "Home") next = 0
-    else if (event.key === "End") next = tabs.length - 1
-    if (next < 0) return
-    event.preventDefault()
-    const tab = tabs[next] as TabDef<T>
-    onValueChange(tab.id)
-    refs.current[tab.id]?.focus()
-  }
-  return (
-    <div
-      data-slot="coding-agent-tabs"
-      className={cn("flex min-w-0 shrink-0 items-center gap-2", className)}
-    >
-      <div
-        role="tablist"
-        aria-label={label}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-        className="flex min-w-0 items-center gap-0.5"
-      >
-        {tabs.map((tab) => {
-          const selected = tab.id === value
-          return (
-            <button
-              key={tab.id}
-              ref={(el) => {
-                refs.current[tab.id] = el
-              }}
-              type="button"
-              role="tab"
-              id={`${idBase}-tab-${tab.id}`}
-              aria-selected={selected}
-              aria-controls={`${idBase}-panel-${tab.id}`}
-              tabIndex={selected ? 0 : -1}
-              onClick={() => onValueChange(tab.id)}
-              className={cn(
-                "chatcn-focus rounded-chatcn-md chatcn-text-13 inline-flex h-8 shrink-0 items-center gap-1.5 px-2.5 font-medium",
-                "ease-chatcn-out transition-[color,background-color] duration-150 pointer-coarse:h-11 pointer-coarse:px-3.5",
-                "[&_svg]:size-3.5 [&_svg]:shrink-0",
-                selected
-                  ? "bg-chatcn-fill text-chatcn-fg"
-                  : "text-chatcn-fg-subtle hover:text-chatcn-fg hover:bg-chatcn-fill-hover",
-              )}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-              {tab.badge !== undefined && tab.badge !== null ? (
-                <span className="chatcn-text-12 text-chatcn-fg-subtle font-normal tabular-nums">
-                  {tab.badge}
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
-      {end ? <div className="ms-auto flex min-w-0 items-center gap-2">{end}</div> : null}
-    </div>
-  )
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -1064,23 +1114,18 @@ function ToolShareFilePart(props: ToolRendererProps) {
 let queueSeq = 0
 
 /**
- * A coding agent workspace in the style of Claude Code and Cursor. The thread runs on the left
- * with reasoning, tool calls and approvals; the workspace on the right shows what the agent
- * changed (files and diffs) and the shell it drives. Todos pin above the composer, messages sent
- * mid run wait in a queue, and the composer carries the permission mode and the context meter.
- * Below 900 px of its own width it becomes one pane with Chat, Files and Terminal tabs.
+ * A quiet tutor chat, built to look like the chat apps students already use.
+ * The thread fills the screen and the composer sits at the bottom. There is no
+ * top bar and no tab strip: a floating chat-list button, a compose button and
+ * one overflow menu hold everything else. Files, changes and the terminal open
+ * as a sheet over the chat, only when the student asks for them.
  */
 function MentorAgent({
   messages,
   status = "ready",
   actions = {},
-  title,
-  branch,
-  model,
-  headerActions,
-  workspaceOpen: workspaceOpenProp,
-  defaultWorkspaceOpen = true,
-  onWorkspaceOpenChange,
+  leadingAction,
+  onNewChat,
   composerModel,
   onOpenModels,
   onOpenSettings,
@@ -1089,18 +1134,12 @@ function MentorAgent({
   workspaceTab: tabProp,
   defaultWorkspaceTab = "files",
   onWorkspaceTabChange,
-  followActivity = true,
-  permissionModes = defaultPermissionModes,
-  permissionMode: modeProp,
-  defaultPermissionMode,
-  onPermissionModeChange,
-  context,
   queue: queueProp,
   defaultQueue = [],
   onQueueChange,
-  placeholder = "Ask for a change…",
+  placeholder = "Ask anything…",
   queuePlaceholder = "Queue a message for when this run ends…",
-  emptyTitle = "What should we change?",
+  emptyTitle = "What should we work on?",
   emptyDescription,
   attachments = [],
   onAttachFiles,
@@ -1110,56 +1149,36 @@ function MentorAgent({
   onOpenFile,
   onDownloadFile,
   onRefreshFiles,
+  onAnswerQuestions,
   suggestions,
   onSuggestion,
   fullHeight = false,
-  splitAt = 900,
   className,
   ...props
 }: CodingAgentProps) {
-  const id = React.useId()
-  const rootRef = React.useRef<HTMLDivElement>(null)
-  const width = useWidth(rootRef)
-  const wide = width === undefined || width >= splitAt
-
   const busy = status === "submitted" || status === "streaming"
   const derived = React.useMemo(() => codingWorkspaceFromMessages(messages), [messages])
   const workspace: CodingWorkspace = { ...derived, ...workspaceProp }
   const { files, terminal, todos } = workspace
 
-  const [tab, setTab] = useControllable(tabProp, defaultWorkspaceTab, onWorkspaceTabChange)
-  const [workspaceOpen, setWorkspaceOpen] = useControllable(
-    workspaceOpenProp,
-    defaultWorkspaceOpen,
-    onWorkspaceOpenChange,
-  )
-  const [view, setView] = React.useState<"chat" | CodingWorkspaceTab>("chat")
+  const [, setTab] = useControllable(tabProp, defaultWorkspaceTab, onWorkspaceTabChange)
+  const [view, setView] = React.useState<CodingWorkspaceTab | null>(null)
   const [selected, setSelected] = React.useState<string | null>(null)
-  const [following, setFollowing] = React.useState(followActivity)
-
-  // A fresh chat starts on Files: the first useful thing a tutor makes is a document.
-  React.useEffect(() => {
-    if (messages.length === 0) setTab("files")
-  }, [messages.length, setTab])
-  const [mode, setMode] = useControllable(
-    modeProp,
-    defaultPermissionMode ?? permissionModes[0]?.id ?? "ask",
-    onPermissionModeChange,
-  )
   const [queue, setQueue] = useControllable(queueProp, defaultQueue, onQueueChange)
   const [input, setInput] = React.useState("")
   const [stopped, setStopped] = React.useState<ReadonlySet<string>>(() => new Set())
 
-  // Follow the agent: a new edit or command moves the workspace to it.
+  // Remember what the agent touched last, so the sheet opens on the right view.
+  // It never opens by itself: a sheet that appears while the student reads is noise.
   const activityKey = workspace.activity?.key
   const activityRef = React.useRef(workspace.activity)
   activityRef.current = workspace.activity
   React.useEffect(() => {
     const activity = activityRef.current
-    if (!activityKey || !activity || !following || !followActivity) return
+    if (!activityKey || !activity) return
     setTab(activity.tab)
     if (activity.path) setSelected(activity.path)
-  }, [activityKey, following, followActivity, setTab])
+  }, [activityKey, setTab])
 
   // When a run ends, everything queued goes out as the next message. The rows stay, marked as
   // sending, until that message shows up in the thread, so the hand-off reads as one motion.
@@ -1176,7 +1195,6 @@ function MentorAgent({
     const ids = new Set(due.map((m) => m.id))
     setSentAt(messages.length)
     setQueue(queueRef.current.map((m) => (ids.has(m.id) ? { ...m, status: "sending" } : m)))
-    setFollowing(true)
     void actions.send(due.map((m) => m.text).join("\n\n"))
   }, [busy, status, actions, setQueue, messages.length])
 
@@ -1203,7 +1221,6 @@ function MentorAgent({
       setQueue([...queue, { id: `queued-${++queueSeq}`, text: trimmed, mode: "after-run" }])
       return
     }
-    setFollowing(true)
     void actions.send(trimmed)
   }
 
@@ -1213,12 +1230,11 @@ function MentorAgent({
     actions.stop?.()
   }
 
-  const pickTab = (next: CodingWorkspaceTab) => {
-    setFollowing(false)
+  const openView = (next: CodingWorkspaceTab) => {
     setTab(next)
+    setView(next)
   }
   const pickFile = (path: string) => {
-    setFollowing(false)
     setSelected(path)
   }
 
@@ -1227,86 +1243,50 @@ function MentorAgent({
       renderers: toolRenderers,
       approve: actions.approve,
       deny: actions.deny,
-      split: wide,
+      split: true,
       onOpenFile,
       onDownloadFile,
+      onAnswerQuestions,
     }),
-    [toolRenderers, actions.approve, actions.deny, wide, onOpenFile, onDownloadFile],
+    [toolRenderers, actions.approve, actions.deny, onOpenFile, onDownloadFile, onAnswerQuestions],
   )
 
-  // Ctrl+` opens the terminal, the way editors do.
+  // Ctrl+` still opens the terminal, the way editors do.
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.key === "`" && !event.isComposing) {
         event.preventDefault()
-        setFollowing(false)
-        setTab("terminal")
-        setView("terminal")
+        openView("terminal")
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [setTab])
+  }, [])
+
+  React.useEffect(() => {
+    if (!view) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault()
+        setView(null)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [view])
+
+  // Move focus into the sheet so keyboard and screen reader users land in it,
+  // and hand it back to the menu button when the sheet closes.
+  const sheetCloseRef = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    if (!view) return
+    const previous = document.activeElement as HTMLElement | null
+    sheetCloseRef.current?.focus()
+    return () => previous?.focus?.()
+  }, [view])
 
   const last = messages.at(-1)
   const liveId = busy && last?.role === "assistant" ? last.id : undefined
-  const waiting = messages.some((m) =>
-    m.parts.some((p) => isToolPart(p) && p.state === "approval-requested"),
-  )
-  const runStatus: RunStatusValue | undefined = waiting
-    ? "waiting"
-    : busy
-      ? "running"
-      : status === "error"
-        ? "failed"
-        : messages.length
-          ? "done"
-          : undefined
-  const firstUser = messages.find((m) => m.role === "user")
-  const heading = title ?? (firstUser ? messageText(firstUser).split("\n")[0] : "New session")
-  const stats = diffStats(files)
-
-  const header = (
-    <header
-      data-slot="coding-agent-header"
-      className="border-chatcn-border flex h-12 shrink-0 items-center gap-3 border-b ps-4 pe-3"
-    >
-      <h1 className="chatcn-text-14 text-chatcn-fg min-w-0 flex-1 truncate font-medium">
-        {heading}
-      </h1>
-      {wide && branch ? (
-        <span className="chatcn-text-12 text-chatcn-fg-subtle flex min-w-0 items-center gap-1.5 font-mono [&_svg]:size-3.5 [&_svg]:shrink-0">
-          <GitBranchIcon />
-          <span className="truncate">{branch}</span>
-        </span>
-      ) : null}
-      {wide && model ? (
-        <span className="chatcn-text-12 text-chatcn-fg-subtle truncate font-mono">{model}</span>
-      ) : null}
-      {runStatus ? (
-        <RunStatus
-          status={runStatus}
-          label={runStatus === "waiting" ? "Needs approval" : undefined}
-          variant="plain"
-          showElapsed={runStatus !== "waiting"}
-        />
-      ) : null}
-      {wide ? (
-        <button
-          type="button"
-          onClick={() => setWorkspaceOpen(!workspaceOpen)}
-          aria-label={workspaceOpen ? "Hide files and terminal" : "Show files and terminal"}
-          aria-expanded={workspaceOpen}
-          title={workspaceOpen ? "Hide files and terminal" : "Show files and terminal"}
-          data-testid="workspace-toggle"
-          className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg flex size-8 shrink-0 items-center justify-center transition-colors"
-        >
-          <PanelRightIcon className="size-4" />
-        </button>
-      ) : null}
-      {headerActions}
-    </header>
-  )
 
   const thread =
     messages.length === 0 ? (
@@ -1324,7 +1304,7 @@ function MentorAgent({
       <Conversation className="min-h-0 flex-1">
         <ConversationContent
           label="Agent session"
-          className="gap-7 px-4 pt-6 pb-6 @3xl/coding-agent:px-6"
+          className="gap-7 px-4 pt-16 pb-6 @3xl/coding-agent:px-6"
           viewportClassName="[mask-image:linear-gradient(to_bottom,transparent,black_20px)]"
         >
           {messages.map((message, i) => (
@@ -1382,56 +1362,12 @@ function MentorAgent({
             </span>
           ))}
         </PromptInputAttachments>
-        <PromptInputTextarea
-          placeholder={busy ? queuePlaceholder : placeholder}
-          aria-keyshortcuts="Shift+Tab"
-          onKeyDown={(event) => {
-            if (event.key === "Tab" && event.shiftKey && !event.nativeEvent.isComposing) {
-              if (!permissionModes.length) return
-              event.preventDefault()
-              setMode(nextPermissionMode(permissionModes, mode))
-            }
-          }}
-        />
+        <PromptInputTextarea placeholder={busy ? queuePlaceholder : placeholder} />
         <PromptInputToolbar>
           <PromptInputTools>
             <PromptInputAttachButton tooltip="Attach a document" />
-            {onOpenModels ? (
-              <button
-                type="button"
-                onClick={onOpenModels}
-                title="Change model"
-                data-testid="model-chip"
-                className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg flex h-8 min-w-0 items-center gap-1.5 px-1.5 transition-colors"
-              >
-                <ModelIcon className="size-3.5 shrink-0" />
-                <span className="chatcn-text-12 max-w-[7.5rem] truncate">
-                  {composerModel ?? "Model"}
-                </span>
-                <ChevronDownIcon className="size-3 shrink-0" />
-              </button>
-            ) : null}
-            {onOpenSettings ? (
-              <PromptInputButton
-                tooltip="Providers & settings"
-                onClick={onOpenSettings}
-                data-testid="open-settings"
-              >
-                <SettingsIcon className="size-4" />
-              </PromptInputButton>
-            ) : null}
-            {permissionModes.length ? (
-              <PermissionMode
-                modes={permissionModes}
-                value={mode}
-                onValueChange={setMode}
-                side="top"
-                iconOnly={!wide && width !== undefined && width < 400}
-              />
-            ) : null}
           </PromptInputTools>
           <PromptInputActions>
-            {context ? <ContextMeter {...context} model={context.model ?? model} /> : null}
             <PromptInputSubmit />
           </PromptInputActions>
         </PromptInputToolbar>
@@ -1439,29 +1375,11 @@ function MentorAgent({
     </div>
   )
 
-  const chatPane = (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {thread}
-      {composer}
-    </div>
-  )
-
-  const changesBadge = files.length ? String(files.length) : undefined
-  const filesBadge = workspaceFiles.length ? String(workspaceFiles.length) : undefined
-  const terminalBadge = terminal.running ? <Spinner className="size-3" /> : undefined
-  const workspaceTabs: TabDef<CodingWorkspaceTab>[] = [
-    { id: "files", label: "Files", icon: <FolderIcon />, badge: filesBadge },
-    { id: "changes", label: "Changes", icon: <DiffIcon />, badge: changesBadge },
-    { id: "terminal", label: "Terminal", icon: <SquareTerminalIcon />, badge: terminalBadge },
-  ]
+  const viewLabel =
+    view === "files" ? "Files" : view === "changes" ? "Changes" : view === "terminal" ? "Terminal" : ""
 
   const panel = (which: CodingWorkspaceTab) => (
-    <div
-      role="tabpanel"
-      id={`${id}-panel-${which}`}
-      aria-labelledby={`${id}-tab-${which}`}
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
-    >
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {which === "files" ? (
         <FilesView
           files={workspaceFiles}
@@ -1477,95 +1395,138 @@ function MentorAgent({
     </div>
   )
 
+  const floatingButton =
+    "chatcn-focus flex size-10 shrink-0 items-center justify-center rounded-full " +
+    "bg-chatcn-bg/65 text-chatcn-fg shadow-chatcn-xs backdrop-blur-md " +
+    "hover:bg-chatcn-fill-hover active:scale-95 transition-[background-color,transform] duration-150"
+
+  const topBar = (
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between px-2 py-1.5">
+      <div className="pointer-events-auto">{leadingAction}</div>
+      <div className="pointer-events-auto flex items-center gap-1">
+        {onNewChat ? (
+          <button
+            type="button"
+            onClick={onNewChat}
+            aria-label="New chat"
+            title="New chat"
+            data-testid="new-chat-top"
+            className={floatingButton}
+          >
+            <SquarePenIcon className="size-5" />
+          </button>
+        ) : null}
+        <Menu>
+          <MenuTrigger aria-label="More options" title="More options" className={floatingButton}>
+            <EllipsisIcon className="size-5" />
+          </MenuTrigger>
+          <MenuContent side="bottom" align="end" sideOffset={8} className="min-w-56">
+            <MenuGroup>
+              <MenuLabel>Workspace</MenuLabel>
+              <MenuItem onClick={() => openView("files")} data-testid="menu-files">
+                <FolderIcon />
+                Files
+                {workspaceFiles.length ? (
+                  <MenuShortcut>{workspaceFiles.length}</MenuShortcut>
+                ) : null}
+              </MenuItem>
+              {files.length ? (
+                <MenuItem onClick={() => openView("changes")} data-testid="menu-changes">
+                  <DiffIcon />
+                  Changes
+                  <MenuShortcut>{files.length}</MenuShortcut>
+                </MenuItem>
+              ) : null}
+              {terminal.text || terminal.running ? (
+                <MenuItem onClick={() => openView("terminal")} data-testid="menu-terminal">
+                  <SquareTerminalIcon />
+                  Terminal
+                  {terminal.running ? (
+                    <MenuShortcut>
+                      <Spinner className="size-3" />
+                    </MenuShortcut>
+                  ) : null}
+                </MenuItem>
+              ) : null}
+            </MenuGroup>
+            {onOpenModels || onOpenSettings ? <MenuSeparator /> : null}
+            {onOpenModels ? (
+              <MenuItem onClick={onOpenModels} data-testid="menu-model">
+                <ModelIcon />
+                Model
+                <MenuShortcut className="max-w-32 truncate">{composerModel ?? "Change"}</MenuShortcut>
+              </MenuItem>
+            ) : null}
+            {onOpenSettings ? (
+              <MenuItem onClick={onOpenSettings} data-testid="menu-settings">
+                <SettingsIcon />
+                Settings
+              </MenuItem>
+            ) : null}
+          </MenuContent>
+        </Menu>
+      </div>
+    </div>
+  )
+
   return (
     <TooltipProvider>
       <PartContext.Provider value={partContext}>
         <div
-          ref={rootRef}
           data-slot="coding-agent"
-          data-layout={wide ? "split" : "stacked"}
           data-chat-status={status}
           className={cn(
-            "bg-chatcn-bg text-chatcn-fg @container/coding-agent flex min-h-0 w-full min-w-0 flex-col overflow-hidden",
+            "bg-chatcn-bg text-chatcn-fg relative flex min-h-0 w-full min-w-0 flex-col overflow-hidden",
             fullHeight ? "h-dvh" : "h-full",
             className,
           )}
           {...props}
         >
-          {header}
-          {wide ? (
-            workspaceOpen ? (
-              <ResizableGroup direction="horizontal" className="min-h-0 flex-1">
-                <ResizablePanel
-                  id={`${id}-chat`}
-                  defaultSize={44}
-                  minSize="360px"
-                  maxSize={64}
-                  className="flex min-w-0 flex-col"
-                >
-                  {chatPane}
-                </ResizablePanel>
-                <ResizableHandle />
-                <ResizablePanel
-                  id={`${id}-workspace`}
-                  minSize="320px"
-                  className="bg-chatcn-bg-subtle flex min-w-0 flex-col"
-                >
-                  <TabBar
-                    tabs={workspaceTabs}
-                    value={tab}
-                    onValueChange={pickTab}
-                    label="Workspace"
-                    idBase={id}
-                    className="border-chatcn-border h-11 border-b px-2"
-                    end={
-                      tab === "changes" && files.length ? (
-                        <DiffStat
-                          additions={stats.additions}
-                          deletions={stats.deletions}
-                          className="me-2"
-                        />
-                      ) : null
-                    }
-                  />
-                  {panel(tab)}
-                </ResizablePanel>
-              </ResizableGroup>
-            ) : (
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">{chatPane}</div>
-            )
-          ) : (
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              aria-hidden="true"
+              className="from-chatcn-bg via-chatcn-bg/80 pointer-events-none absolute inset-x-0 top-0 z-20 h-20 bg-gradient-to-b to-transparent"
+            />
+            {topBar}
+            {thread}
+            {composer}
+          </div>
+
+          {view ? (
             <>
-              <TabBar
-                tabs={[
-                  { id: "chat", label: "Chat", icon: <MessageSquareIcon /> },
-                  ...workspaceTabs,
-                ]}
-                value={view}
-                onValueChange={(next) => {
-                  setView(next)
-                  if (next !== "chat") pickTab(next)
-                }}
-                label="Session"
-                idBase={id}
-                className="border-chatcn-border h-11 border-b px-2 pointer-coarse:h-14"
+              <div
+                className="bg-chatcn-scrim absolute inset-0 z-40"
+                onClick={() => setView(null)}
+                aria-hidden="true"
               />
-              {view === "chat" ? (
-                <div
-                  role="tabpanel"
-                  id={`${id}-panel-chat`}
-                  aria-labelledby={`${id}-tab-chat`}
-                  className="flex min-h-0 flex-1 flex-col"
-                >
-                  {chatPane}
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-label={viewLabel}
+                data-slot="workspace-sheet"
+                className={cn(
+                  "bg-chatcn-surface border-chatcn-border shadow-chatcn-xl absolute inset-x-0 bottom-0 top-14 z-50 flex flex-col overflow-hidden rounded-t-chatcn-xl border-t",
+                  "sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[min(480px,92vw)] sm:rounded-none sm:border-s sm:border-t-0",
+                )}
+              >
+                <div className="border-chatcn-border flex h-12 shrink-0 items-center gap-2 border-b px-3">
+                  <h2 className="chatcn-text-14 text-chatcn-fg min-w-0 flex-1 truncate font-medium">
+                    {viewLabel}
+                  </h2>
+                  <button
+                    type="button"
+                    ref={sheetCloseRef}
+                    onClick={() => setView(null)}
+                    aria-label="Close"
+                    className="chatcn-focus text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg rounded-chatcn-sm flex size-8 items-center justify-center"
+                  >
+                    <XIcon className="size-4" />
+                  </button>
                 </div>
-              ) : (
-                <div className="bg-chatcn-bg-subtle flex min-h-0 flex-1 flex-col">
-                  {panel(view)}
-                </div>
-              )}
+                {panel(view)}
+              </section>
             </>
-          )}
+          ) : null}
         </div>
       </PartContext.Provider>
     </TooltipProvider>
@@ -1573,7 +1534,6 @@ function MentorAgent({
 }
 
 export type {
-  CodingAgentContext,
   CodingAgentProps as MentorAgentProps,
   CodingAgentStatus as MentorAgentStatus,
   CodingTerminalState,

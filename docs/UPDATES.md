@@ -59,9 +59,9 @@ Rules that matter:
   `web-v1.0.1` and `v1.0.1` both work.
 - Attach a `.zip` whose name mentions `mentor-web`, `web` or `dist` so the app
   picks it over any other zip on the release.
-- The running native version starts at `1.0` (`versionName` in
-  `web/android/app/build.gradle`), so the first web release should be `1.0.1` or
-  higher.
+- The running native version is `versionName` in
+  `web/android/app/build.gradle` (currently `1.0.3`), so the first web release
+  after that APK should be `1.0.4` or higher.
 - Do not start a web version below the native version. `resetWhenUpdate` makes
   the native install win, and a lower web tag would be ignored.
 

@@ -87,8 +87,12 @@ export default function App() {
 
   useEffect(() => {
     if (!saved) return;
-    if (saved.state !== "successful" && saved.state !== "failed") return;
-    hideTimer.current = setTimeout(() => setSaved(null), saved.state === "successful" ? 12000 : 8000);
+    if (saved.state === "pending" || saved.state === "running") return;
+    // "started" means the query went quiet, so there is no result to wait for.
+    hideTimer.current = setTimeout(
+      () => setSaved(null),
+      saved.state === "successful" ? 12000 : 8000,
+    );
     return () => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
@@ -105,14 +109,18 @@ export default function App() {
     const id = result.id;
     setSaved({ id, name: result.filename, state: "running" });
     const started = Date.now();
+    let misses = 0;
     const tick = async () => {
       const state = await downloadStatus(id);
       if (state === "successful" || state === "failed") {
         setSaved({ id, name: result.filename, state });
         return;
       }
-      if (Date.now() - started > 120_000) {
-        setSaved({ id, name: result.filename, state: "failed" });
+      // The download is still going, or the query is unavailable for a moment.
+      // Only the DownloadManager itself may call a download failed.
+      if (state === "unknown") misses += 1;
+      if (Date.now() - started > 120_000 || misses >= 6) {
+        setSaved({ id, name: result.filename, state: "started" });
         return;
       }
       pollTimer.current = setTimeout(() => void tick(), 800);
@@ -133,16 +141,16 @@ export default function App() {
     }
   };
 
-  const headerActions = (
+  const chatListButton = (
     <button
       type="button"
       onClick={toggleRail}
       aria-label="Chats"
       aria-expanded={!railCollapsed}
       title="Chats"
-      className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg flex size-9 items-center justify-center transition-colors"
+      className="chatcn-focus text-chatcn-fg shadow-chatcn-xs hover:bg-chatcn-fill-hover flex size-10 items-center justify-center rounded-full bg-chatcn-bg/65 backdrop-blur-md transition-[background-color,transform] duration-150 active:scale-95"
     >
-      <PanelLeftIcon className="size-4" />
+      <PanelLeftIcon className="size-5" />
     </button>
   );
 
@@ -201,8 +209,8 @@ export default function App() {
             messages={mentor.messages}
             status={mentor.status}
             actions={{ send: mentor.send, stop: mentor.stop }}
-            title={mentor.activeSession?.title ?? "New chat"}
-            headerActions={headerActions}
+            leadingAction={chatListButton}
+            onNewChat={() => void mentor.newSession()}
             emptyTitle="What should we work on?"
             emptyDescription="Ask about your notes, attach a PDF, or have me build a study guide, worksheet or script."
             suggestions={mentor.starters.map((label) => ({ label }))}
@@ -216,16 +224,7 @@ export default function App() {
             onDownloadFile={(path) => void saveFile(path)}
             onRefreshFiles={() => void mentor.refreshFiles()}
             workspace={todos.length ? { todos } : undefined}
-            permissionModes={[]}
-            context={
-              mentor.activeModel?.contextWindow
-                ? {
-                    limit: mentor.activeModel.contextWindow,
-                    used: mentor.tokensUsed,
-                    model: mentor.activeModel.name,
-                  }
-                : undefined
-            }
+            onAnswerQuestions={mentor.answerQuestions}
             placeholder="Ask anything..."
             queuePlaceholder="Queue a message for when this run ends..."
             composerModel={mentor.activeModel?.name ?? mentor.model ?? "Model"}

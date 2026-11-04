@@ -68,10 +68,28 @@ public class DownloaderPlugin extends Plugin {
         }
     }
 
+    /**
+     * The id crosses the bridge as a JSON number, which Capacitor hands to Java
+     * as an Integer for values that fit. PluginCall.getLong only accepts a Long,
+     * so it would reject every normal download id. Read the raw value instead.
+     */
+    private Long downloadId(PluginCall call) {
+        Object value = call.getData().opt("id");
+        if (value instanceof Number) return ((Number) value).longValue();
+        if (value instanceof String) {
+            try {
+                return Long.parseLong((String) value);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     /** "pending", "running", "successful" or "failed". */
     @PluginMethod
     public void status(PluginCall call) {
-        Long id = call.getLong("id");
+        Long id = downloadId(call);
         if (id == null) {
             call.reject("id is required");
             return;
@@ -113,7 +131,7 @@ public class DownloaderPlugin extends Plugin {
     /** Open a finished download in the app that handles its type. */
     @PluginMethod
     public void open(PluginCall call) {
-        Long id = call.getLong("id");
+        Long id = downloadId(call);
         if (id == null) {
             call.reject("id is required");
             return;

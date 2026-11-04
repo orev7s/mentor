@@ -935,6 +935,17 @@ export function useMentor() {
     }
   }, []);
 
+  /** Hand the student's answers to the ask_student call that is waiting. */
+  const answerQuestions = useCallback(
+    async (toolCallId: string, answers: { question: string; selected: string[] }[]) => {
+      const api = clientRef.current;
+      const id = activeIdRef.current;
+      if (!api || !id) throw new Error("No active chat.");
+      await api.answerQuestions(id, toolCallId, answers);
+    },
+    [],
+  );
+
   const attachFiles = useCallback(
     async (incoming: File[]) => {
       const api = clientRef.current;
@@ -1132,6 +1143,7 @@ export function useMentor() {
     deleteSession,
     send,
     stop,
+    answerQuestions,
     forkMessage,
     attachFiles,
     removeAttachment,

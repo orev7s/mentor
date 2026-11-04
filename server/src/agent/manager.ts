@@ -12,6 +12,7 @@ import {
 import { ensureDirs, paths } from "../config.js";
 import { listWorkspaceFiles } from "../files.js";
 import { buildTools } from "../tools/index.js";
+import { QuestionBroker, type AskAnswer } from "../tools/ask.js";
 import { modelRef, resolveModelRef } from "./runtime.js";
 
 /**
@@ -28,7 +29,9 @@ You are Mentor, a patient one-on-one tutor for a single student. Teach the way a
 - Use web_search and web_fetch for facts that may have changed, and cite the URLs you used.
 - For any task that takes more than a couple of steps, call todo_write first, then update it as you work. The student sees the plan live above the composer.
 - You can write files and run bash inside the session workspace. When you make a deliverable (PDF, slide deck, worksheet, diagram, script, study notes), save it in the workspace root with a clear filename, run what you need to verify it, then call share_file with its path so the student gets a download card. Keep the prose short: say what it is, then share it.
+- You can install missing tools yourself. If a command, library or format tool is missing (pdftotext, pandoc, LibreOffice, a Python package, an npm package), install it with apt-get, pip, npm, or the package manager that fits, then retry. Do not tell the student a format is unsupported until you have tried to install what you need. If installation is blocked, say exactly what is missing and offer a plain-text or Markdown alternative.
 - The student sees a Files panel with everything in the workspace, and an automatic list of the files you created or changed in each run. Do not paste a whole file into chat when the student can download it.
+- When you need a decision or want to check understanding, use ask_student with one to six multiple-choice questions. It waits for the student and returns their answers. Use it when the student asks to be quizzed, when their level or goal is unclear, or before a task where the wrong format would waste their time. Do not use it for every little thing: one good question beats five.
 - Never claim a file or command worked unless the tool result confirms it. If a command fails, read the error and try another approach.
 - If the student has not named their level, assume a motivated secondary school or early university student.`;
 
@@ -147,12 +150,15 @@ export class TutorSession {
   private subscribers = new Set<(event: unknown) => void>();
   private unsubscribe: () => void;
   private busy = false;
+  /** Questions this run is waiting on, keyed by tool call id. */
+  private readonly questions: QuestionBroker;
   /** When the current prompt started, used to find the files it produced. */
   private runStartedAt: number | null = null;
 
-  private constructor(meta: SessionMeta, session: AgentSession) {
+  private constructor(meta: SessionMeta, session: AgentSession, questions: QuestionBroker) {
     this.meta = meta;
     this.session = session;
+    this.questions = questions;
     this.unsubscribe = session.subscribe((event) => {
       // List the run's files before the client hears that the run settled, so the
       // artifacts card lands inside the assistant message it belongs to.
@@ -196,6 +202,7 @@ export class TutorSession {
     const model = meta.model ? await resolveModelRef(meta.model) : undefined;
     const manager = SessionManager.create(meta.cwd, paths.sessions);
     appendSeed(manager, seed, meta.model);
+    const questions = new QuestionBroker();
     const { session } = await createAgentSession({
       cwd: meta.cwd,
       agentDir: paths.agentDir,
@@ -203,11 +210,11 @@ export class TutorSession {
       model,
       thinkingLevel: meta.thinkingLevel,
       resourceLoader: await buildLoader(meta.cwd),
-      customTools: buildTools(meta.cwd),
+      customTools: buildTools(meta.cwd, questions),
     });
     meta.file = manager.getSessionFile();
     if (model) meta.model = modelRef(model);
-    return new TutorSession(meta, session);
+    return new TutorSession(meta, session, questions);
   }
 
   static async open(meta: SessionMeta): Promise<TutorSession> {
@@ -215,6 +222,7 @@ export class TutorSession {
     const manager = meta.file
       ? SessionManager.open(meta.file, paths.sessions, meta.cwd)
       : SessionManager.create(meta.cwd, paths.sessions);
+    const questions = new QuestionBroker();
     const { session } = await createAgentSession({
       cwd: meta.cwd,
       agentDir: paths.agentDir,
@@ -222,9 +230,9 @@ export class TutorSession {
       model,
       thinkingLevel: meta.thinkingLevel,
       resourceLoader: await buildLoader(meta.cwd),
-      customTools: buildTools(meta.cwd),
+      customTools: buildTools(meta.cwd, questions),
     });
-    return new TutorSession(meta, session);
+    return new TutorSession(meta, session, questions);
   }
 
   subscribe(listener: (event: unknown) => void): () => void {
@@ -252,7 +260,13 @@ export class TutorSession {
       });
   }
 
+  /** Deliver the student's answers to a waiting ask_student call. */
+  answerQuestions(toolCallId: string, answers: AskAnswer[]): boolean {
+    return this.questions.answer(toolCallId, answers);
+  }
+
   async abort(): Promise<void> {
+    this.questions.cancel();
     await this.session.abort();
   }
 
@@ -271,6 +285,7 @@ export class TutorSession {
   }
 
   dispose(): void {
+    this.questions.cancel();
     this.unsubscribe();
     this.session.dispose();
   }

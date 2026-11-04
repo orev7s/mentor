@@ -66,14 +66,18 @@ export async function downloadFile(url: string, filename: string): Promise<Downl
   return { id: null, filename };
 }
 
-/** How DownloadManager is getting on with the file. */
-export async function downloadStatus(id: number): Promise<DownloadState> {
+/**
+ * How DownloadManager is getting on with the file. A failed status call is not
+ * a failed download: the file can be saved while the query is unavailable, so
+ * report "unknown" and let the caller keep watching.
+ */
+export async function downloadStatus(id: number): Promise<DownloadState | "unknown"> {
   if (!Capacitor.isNativePlatform()) return "successful";
   try {
     const result = await Downloader.status({ id });
     return result.status;
   } catch {
-    return "failed";
+    return "unknown";
   }
 }
 

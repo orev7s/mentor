@@ -1,5 +1,5 @@
 import { chromium } from "playwright-core";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +16,8 @@ const PROMPT =
     "and finish with a two sentence explanation.";
 
 mkdirSync(SHOTS, { recursive: true });
+// A failed run leaves a screenshot behind; a passing run should not keep it.
+rmSync(join(SHOTS, "99-failure.png"), { force: true });
 
 const browser = await chromium.launch({
   executablePath: CHROME,
@@ -25,6 +27,12 @@ const context = await browser.newContext({ viewport: { width: 1280, height: 860 
 const page = await context.newPage();
 
 const log = (...args) => console.log("[ui]", ...args);
+const openMenu = async () => {
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.waitForSelector('[data-slot="menu-content"]');
+  // The popup has a short enter animation; let it settle before clicking an item.
+  await page.waitForTimeout(250);
+};
 const errors = [];
 page.on("console", (msg) => {
   if (msg.type() === "error") errors.push(msg.text());
@@ -42,7 +50,7 @@ try {
   await page.waitForSelector('textarea[aria-label="Message"]', { timeout: 30000 });
   log("connected");
 
-  await page.click('[data-testid="new-chat"]');
+  await page.click('[data-testid="new-chat-top"]');
   await page.waitForTimeout(700);
   await page.screenshot({ path: join(SHOTS, "02-empty.png") });
   log("empty state captured");
@@ -62,25 +70,37 @@ try {
   await page.screenshot({ path: join(SHOTS, "03-chat.png") });
   log("chat captured");
 
-  for (const [tab, file] of [
-    ["Files", "04-files.png"],
-    ["Changes", "05-changes.png"],
-    ["Terminal", "06-terminal.png"],
+  for (const [item, file] of [
+    ["menu-files", "04-files.png"],
+    ["menu-changes", "05-changes.png"],
+    ["menu-terminal", "06-terminal.png"],
   ]) {
-    const button = page.getByRole("tab", { name: new RegExp(`^${tab}`) }).last();
-    if (await button.count()) {
-      await button.click();
+    await openMenu();
+    const entry = page.locator(`[data-testid="${item}"]`);
+    if (await entry.count()) {
+      await entry.click();
+      await page.waitForSelector('[data-slot="workspace-sheet"]');
       await page.waitForTimeout(500);
       await page.screenshot({ path: join(SHOTS, file) });
-      log(`${tab} tab captured`);
+      log(`${item} sheet captured`);
+      await page.getByRole("button", { name: "Close" }).last().click();
+      await page.waitForTimeout(250);
+    } else {
+      log(`${item} not offered (nothing to show)`);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(250);
     }
   }
 
-  await page.getByRole("tab", { name: /^Files/ }).last().click();
+  await openMenu();
+  await page.locator('[data-testid="menu-files"]').click();
+  await page.waitForSelector('[data-slot="workspace-sheet"]');
   await page.waitForTimeout(300);
-  const rowCount = await page.locator('[data-slot="coding-agent"] li').count();
+  const rowCount = await page.locator('[data-slot="workspace-sheet"] li').count();
   if (rowCount === 0) log("no files listed (the model may not have written one)");
   else log(`${rowCount} file rows listed`);
+  await page.getByRole("button", { name: "Close" }).last().click();
+  await page.waitForTimeout(250);
 
   const artifacts = page.locator('[data-slot="run-artifacts"]');
   const artifactCount = await artifacts.count();
@@ -99,32 +119,30 @@ try {
     }
   }
 
-  await page.click('[data-testid="model-chip"]');
+  await openMenu();
+  await page.locator('[data-testid="menu-model"]').click();
   await page.waitForSelector('[data-testid="model-search"]');
   await page.screenshot({ path: join(SHOTS, "07-model-picker.png") });
   await page.click('[data-testid="close-model-picker"]');
   log("model picker captured");
 
-  await page.click('[data-testid="open-settings"]');
+  await openMenu();
+  await page.locator('[data-testid="menu-settings"]').click();
   await page.waitForSelector('[data-testid="close-settings"]');
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(SHOTS, "08-settings.png") });
   await page.click('[data-testid="close-settings"]');
   log("settings captured");
 
-  // Desktop and tablet can fold the workspace and the chat list away.
-  const workspaceToggle = page.locator('[data-testid="workspace-toggle"]');
-  if (await workspaceToggle.count()) {
-    await workspaceToggle.click();
-    await page.waitForTimeout(400);
-    const tabsLeft = await page.getByRole("tab", { name: /^Changes/ }).count();
-    log(`workspace closed (changes tab gone: ${tabsLeft === 0})`);
-    await page.screenshot({ path: join(SHOTS, "10-workspace-hidden.png") });
-    await workspaceToggle.click();
-    await page.waitForTimeout(300);
-  } else {
-    log("WARNING: no workspace toggle on desktop");
-  }
+  // The workspace lives in one sheet now: open it, then close it again.
+  await openMenu();
+  await page.locator('[data-testid="menu-files"]').click();
+  await page.waitForSelector('[data-slot="workspace-sheet"]');
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: join(SHOTS, "10-workspace-sheet.png") });
+  await page.getByRole("button", { name: "Close" }).last().click();
+  await page.waitForTimeout(300);
+  log("workspace sheet opens and closes");
 
   const chatsButton = page.getByRole("button", { name: "Chats" });
   await chatsButton.click();

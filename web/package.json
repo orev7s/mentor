@@ -9,6 +9,7 @@
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
     "ui-test": "node scripts/ui-test.mjs",
+    "ask-test": "node scripts/ask-test.mjs",
     "release:web": "node scripts/release-web.mjs"
   },
   "dependencies": {

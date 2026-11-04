@@ -79,6 +79,7 @@ Sessions:
 | GET | `/sessions/:id/files` | List the workspace (uploads and generated files) |
 | GET | `/sessions/:id/file` | Serve one workspace file; `?download=1` attaches it |
 | POST | `/sessions/:id/prompt` | `{ text }`, returns 202 immediately |
+| POST | `/sessions/:id/answers` | `{ toolCallId, answers }` resolves a waiting `ask_student` call |
 | POST | `/sessions/:id/abort` | Stop the current run |
 | POST | `/uploads` | Multipart `file` + `sessionId`, saved into the workspace |
 
@@ -116,6 +117,7 @@ session workspace. `customTools` adds to that set. Added as custom tools:
 | --- | --- |
 | `todo_write` | Publishes the plan; the UI pins it above the composer |
 | `share_file` | Offers one workspace file as a download card in the reply |
+| `ask_student` | Asks one to six multiple-choice questions and waits for the answer |
 | `read_document` | Extract text from PDF (unpdf), DOCX (mammoth), HTML (turndown), MD/TXT |
 | `ocr_image` | OCR an image with tesseract.js (offline) |
 | `web_search` | Exa when `EXA_API_KEY` is set, else keyless Bing HTML (DuckDuckGo only as a last resort) |
@@ -123,14 +125,27 @@ session workspace. `customTools` adds to that set. Added as custom tools:
 
 Every file tool refuses paths outside the workspace. A tutor system prompt is
 appended to Pi's default prompt (teach step by step, plan with `todo_write`,
-cite sources, save deliverables in the workspace so Files shows them).
+cite sources, save deliverables in the workspace so Files shows them, install a
+missing command or library before saying a format is unsupported).
+
+`ask_student` holds the tool call open on a per-session broker until the client
+posts answers to `/sessions/:id/answers`. The answers become the tool result, so
+the agent continues the same run with them in context. Aborting the run or
+disposing the session resolves any waiting question with "no answer". A pending
+question survives a reload: the tool call is already in the transcript, so the
+card renders again and the broker still holds the wait.
 
 ## App shell
 
-- Mobile first. Under 900 px of its own width the workspace stacks into Chat,
-  Files, Changes and Terminal tabs. Above that the chat and the workspace sit
-  side by side, and the header folds either away: one button for the chat list,
-  one for the workspace.
+- Mobile first and deliberately plain: no top bar and no tab strip. The thread
+  fills the screen, the composer sits at the bottom, and three floating buttons
+  sit over a short top gradient. One opens the chat drawer, one starts a new
+  chat, and one overflow menu holds Files, Changes, Terminal, Model and
+  Settings.
+- Files, changes and terminal open as a sheet over the chat. On phones it slides
+  up from the bottom; on wide screens it is a right drawer. It never opens by
+  itself: activity only selects which view the sheet will show when the student
+  opens it.
 - Messages share one centered column. The student's turns keep a filled bubble,
   the agent's stay flat, and both are centered rather than pinned to opposite
   edges. Every message has Copy; every message has Fork from here.
@@ -138,17 +153,20 @@ cite sources, save deliverables in the workspace so Files shows them).
   resends that text. Forking at an assistant turn seeds through that reply and
   leaves the new chat ready for the next question. Seeds are text only: Pi is
   given real user and assistant messages, never a tool call without its result.
-- The composer carries the model chip and the providers/settings button, so the
-  header stays a title, a run status and the two fold buttons.
+- The composer keeps only attach and send. Model and provider settings live in
+  the overflow menu, so the chat has one obvious place to type.
 - Downloads on Android go through a `Downloader` plugin that hands the URL to
   the system `DownloadManager`. The server sends `Content-Disposition` with the
   real name and extension, so a PDF lands as `report.pdf` in Downloads. The
-  client polls the download and shows a toast with Open when it is ready. In a
-  plain browser a normal `<a download>` is used.
+  client polls the download and shows a notice at the top of the screen (below
+  the floating buttons) with Open when it is ready. A status query that fails is
+  not a failed download: the client keeps watching and says "Download started"
+  if the query stays unavailable. In a plain browser a normal `<a download>` is
+  used.
 - Android 15 and later run apps edge to edge. `MainActivity` turns the system
   bars into `--safe-top`, `--safe-bottom` and side inset variables, and the app
-  shell pads the header, the drawer and the composer with them. The keyboard is
-  handled in the web layer: it compares the shell height with
+  shell pads the floating buttons, the drawer and the composer with them. The
+  keyboard is handled in the web layer: it compares the shell height with
   `visualViewport.height` and pads only by the difference, so the composer sits
   on the keyboard without a blank gap. The activity uses `adjustNothing`, which
   leaves that one mechanism in charge.
