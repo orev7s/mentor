@@ -24,3 +24,7 @@ createRoot(document.getElementById("root")!).render(
     <App />
   </StrictMode>,
 );
+
+// Tells the boot watchdog in index.html that the app started, so it does not
+// paint its "did not start" panel over a working screen.
+(window as unknown as { __mentorMounted?: boolean }).__mentorMounted = true;

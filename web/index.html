@@ -8,7 +8,54 @@
     <title>Mentor</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="padding:24px;font:14px/1.5 system-ui,sans-serif;color:#c9c9cf;background:#0a0a0c">
+        Starting Mentor...
+      </div>
+    </div>
+    <script>
+      // Never leave a silent black screen. If React has not mounted after a few
+      // seconds, show what the page is and what went wrong instead.
+      (function () {
+        window.__mentorBootErrors = [];
+        function note(value) {
+          try {
+            window.__mentorBootErrors.push(String(value));
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        window.addEventListener("error", function (event) {
+          note(event.message || (event.error && event.error.message) || event.type);
+        });
+        window.addEventListener("unhandledrejection", function (event) {
+          note((event.reason && (event.reason.message || event.reason)) || "unhandled rejection");
+        });
+        function show() {
+          if (window.__mentorMounted) return;
+          var root = document.getElementById("root");
+          if (!root) return;
+          var detail =
+            "Mentor did not start.\n\n" +
+            "URL: " +
+            location.href +
+            "\n\nErrors: " +
+            (window.__mentorBootErrors.length
+              ? window.__mentorBootErrors.join(" | ")
+              : "none captured") +
+            "\n\nUser agent: " +
+            navigator.userAgent;
+          var pre = document.createElement("pre");
+          pre.style.cssText =
+            "white-space:pre-wrap;padding:16px;margin:0;font:12px/1.5 ui-monospace,monospace;color:#e5e5e5;background:#0a0a0c";
+          pre.textContent = detail;
+          root.innerHTML = "";
+          root.appendChild(pre);
+        }
+        window.setTimeout(show, 7000);
+        window.setTimeout(show, 15000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

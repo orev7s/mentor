@@ -125,6 +125,15 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
   app.use(cors());
   app.use(express.json({ limit: "4mb" }));
 
+  // A short access log, minus hashed assets, so a phone that fails to load the
+  // UI is visible in the server log instead of silent.
+  app.use((req, _res, next) => {
+    if (!req.path.startsWith("/assets/")) {
+      console.log(`[http] ${req.method} ${req.path}`);
+    }
+    next();
+  });
+
   app.get("/api", (_req, res) => {
     res.json({ name: "mentor-server", version: 1, status: "ok" });
   });
@@ -137,8 +146,23 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
 
   const webDir = process.env.MENTOR_WEB_DIR ?? resolve(process.cwd(), "../web/dist");
   if (existsSync(webDir)) {
-    app.use(express.static(webDir, { index: false }));
+    app.use(
+      express.static(webDir, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith(".html")) {
+            // Never cache HTML: a cached page can point at asset hashes that a
+            // later build removed, which paints a blank screen until the app data
+            // is cleared. Hashed assets below can be cached forever instead.
+            res.setHeader("cache-control", "no-store");
+          } else if (filePath.includes(`${sep}assets${sep}`)) {
+            res.setHeader("cache-control", "public, max-age=31536000, immutable");
+          }
+        },
+      }),
+    );
     app.get("/", (_req, res) => {
+      res.setHeader("cache-control", "no-store");
       res.sendFile(join(webDir, "index.html"));
     });
   }
