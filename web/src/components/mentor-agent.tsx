@@ -40,6 +40,7 @@ import { ScrollToBottom } from "@/components/ui/chatcn/scroll-to-bottom"
 import { ShimmerText } from "@/components/ui/chatcn/shimmer-text"
 import { Spinner } from "@/components/ui/chatcn/spinner"
 import { type TodoItem, TodoList } from "@/components/ui/chatcn/todo-list"
+import { TaskStatusGlyph } from "@/components/ui/chatcn/task"
 import { toolBashRenderers } from "@/components/ui/chatcn/tool-bash"
 import { ToolCall } from "@/components/ui/chatcn/tool-call"
 import {
@@ -446,10 +447,51 @@ function WorkingRow({
   )
 }
 
-/** A todo update in the thread: one quiet row, the list itself one click away. */
+/** A todo update in the thread: the plan, then one short row per step finished. */
 function ToolTodoWritePart(props: ToolRendererProps) {
+  const updates = React.useContext(TodoUpdateContext)
+  const update = updates.get(props.part.toolCallId)
   const items = todosFrom(props.part.input)
   const done = items.filter((t) => t.status === "done").length
+  const first = !update || update.first
+
+  // Every update after the plan becomes a compact marker at the point it happened,
+  // so the trace reads thought, completed step, thought, completed step.
+  if (!first && update.changed.length) {
+    const completed = update.completed.length > 0
+    const detail =
+      update.changed.length === 1 ? update.changed[0].title : `${update.done} of ${update.total} done`
+    return (
+      <ToolCall
+        {...toolBasePropsFromPart(props)}
+        name="todo_write"
+        icon={completed ? <CircleCheckIcon /> : <ListChecksIcon />}
+        title={completed ? "Completed" : "Started"}
+        detail={detail}
+      >
+        <ul className="flex flex-col gap-1 px-1 pb-1.5">
+          {update.changed.map((item) => (
+            <li key={item.id} data-slot="todo-step" className="flex min-w-0 items-center gap-2.5">
+              <TaskStatusGlyph status={item.status} />
+              <span
+                className={cn(
+                  "chatcn-text-13 min-w-0 truncate",
+                  item.status === "done" &&
+                    "text-chatcn-fg-subtle line-through decoration-1 decoration-chatcn-fg-faint",
+                )}
+              >
+                {item.title}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </ToolCall>
+    )
+  }
+
+  // A re-sent list with no status change adds nothing to the thread.
+  if (!first) return null
+
   return (
     <ToolCall
       {...toolBasePropsFromPart(props)}
@@ -699,12 +741,59 @@ function readGroups(message: ChatcnMessage) {
     else flush()
   }
   flush()
-  // The todo list is pinned above the composer, so only the first update in a turn shows here.
-  const todoParts = message.parts.filter(
-    (p): p is ChatcnToolPart => isToolPart(p) && TODO_TOOLS.has(toolKey(p)),
-  )
-  for (const p of todoParts.slice(1)) groups.set(p.toolCallId, { leader: "", parts: [] })
   return groups
+}
+
+/** The change one `todo_write` makes relative to the last one in the same turn. */
+interface TodoUpdate {
+  /** True for the first update of the turn: the plan itself, shown in full. */
+  first: boolean
+  /** Items that moved into done in this update. */
+  completed: TodoItem[]
+  /** Items that moved into in-progress in this update. */
+  started: TodoItem[]
+  /** Every item whose status changed in this update, in list order. */
+  changed: TodoItem[]
+  total: number
+  done: number
+}
+
+/**
+ * The agent marks a plan step done with a `todo_write` between two thoughts. Diff
+ * each update against the one before it so the thread can show a short "Completed
+ * <task>" row at the point it happened, instead of hiding every update but the
+ * first and leaving the student to watch only the pinned card.
+ */
+function todoUpdatesInMessage(message: ChatcnMessage): Map<string, TodoUpdate> {
+  const out = new Map<string, TodoUpdate>()
+  let previous: TodoItem[] | null = null
+  for (const part of message.parts) {
+    if (!isToolPart(part)) continue
+    const key = toolKey(part)
+    if (TODO_CLEAR_TOOLS.has(key)) {
+      previous = null
+      continue
+    }
+    if (!TODO_TOOLS.has(key)) continue
+    const items = todosFrom(part.input)
+    const before = new Map((previous ?? []).map((item) => [item.title, item.status]))
+    const completed = items.filter(
+      (item) => item.status === "done" && before.get(item.title) !== "done",
+    )
+    const started = items.filter(
+      (item) => item.status === "in-progress" && before.get(item.title) !== "in-progress",
+    )
+    out.set(part.toolCallId, {
+      first: previous === null,
+      completed,
+      started,
+      changed: [...completed, ...started],
+      total: items.length,
+      done: items.filter((item) => item.status === "done").length,
+    })
+    previous = items
+  }
+  return out
 }
 
 interface PartContextValue {
@@ -720,6 +809,7 @@ interface PartContextValue {
 
 const PartContext = React.createContext<PartContextValue>({ renderers: defaultToolRenderers })
 const GroupContext = React.createContext<Map<string, ReadGroup>>(new Map())
+const TodoUpdateContext = React.createContext<Map<string, TodoUpdate>>(new Map())
 
 function ReadGroupRow({ group, stopped }: { group: ReadGroup; stopped: boolean }) {
   const parts = group.parts
@@ -830,6 +920,7 @@ const AgentMessage = React.memo(function AgentMessage({
   speaking?: boolean
 }) {
   const groups = React.useMemo(() => readGroups(message), [message])
+  const todoUpdates = React.useMemo(() => todoUpdatesInMessage(message), [message])
   const text = messageText(message)
   const fork = onFork ? (
     <MessageAction label="Fork from here" onClick={() => onFork(message)}>
@@ -867,15 +958,17 @@ const AgentMessage = React.memo(function AgentMessage({
     >
       <MessageContent>
         <GroupContext.Provider value={groups}>
-          <MessageParts
-            message={message}
-            streaming={streaming}
-            stopped={stopped}
-            renderText={renderMarkdown}
-            components={partComponents}
-            toolVariant="inline"
-            showThinking={false}
-          />
+          <TodoUpdateContext.Provider value={todoUpdates}>
+            <MessageParts
+              message={message}
+              streaming={streaming}
+              stopped={stopped}
+              renderText={renderMarkdown}
+              components={partComponents}
+              toolVariant="inline"
+              showThinking={false}
+            />
+          </TodoUpdateContext.Provider>
         </GroupContext.Provider>
       </MessageContent>
       <MessageStatus />

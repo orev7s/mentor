@@ -21,7 +21,7 @@ calls stay in the thread.
 
 - streaming Markdown (code, tables, math), reasoning, and every tool call
 - a pinned todo list the agent writes with `todo_write`, plus the same plan in
-  the thread
+  the thread and a one-line Completed row for each step as it finishes
 - a working row under the thread while a run is in flight, for every model:
   "Working" with the current step and elapsed time, so instant tool calls never
   look like nothing is happening

@@ -108,9 +108,12 @@ authoritative message on `message_end`.
 The React client reduces the same events into the chatcn message contract:
 text and reasoning parts for deltas, `tool-${name}` parts for tool calls,
 `todo_write` inputs for the pinned plan, and normalized tool results for the
-renderers (search results, page excerpts, stdout/exit code, unified diffs). All
-assistant turns between two user messages share one assistant message, so a
-multi-step run reads as one reply with a trace.
+renderers (search results, page excerpts, stdout/exit code, unified diffs).
+Every `todo_write` after the first is diffed against the one before it and
+renders as a short "Completed <task>" row at the point the step finished, so the
+trace reads thought, completed step, thought, completed step. All assistant turns
+between two user messages share one assistant message, so a multi-step run reads
+as one reply with a trace.
 
 ## Pi tools (extensions)
 
