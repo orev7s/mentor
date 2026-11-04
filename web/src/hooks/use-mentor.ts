@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatcnMessage, ChatcnPart, ChatcnTextPart, ChatcnToolPart } from "@/lib/chatcn-types";
+import type { ChatcnMessage, ChatcnTextPart } from "@/lib/chatcn-types";
 import {
   ApiClient,
   modelRef,
@@ -11,212 +11,21 @@ import {
   type SessionMeta,
   type WorkspaceFile,
 } from "@/lib/api";
+import { messageTextOf } from "@/lib/mentor-messages";
+import { nextId, type ChatStatus, type RunState } from "./mentor/mentor-shared";
+import { useMentorStream } from "./mentor/use-mentor-stream";
 
-export type ChatStatus = "ready" | "submitted" | "streaming" | "error";
+export type { ChatStatus } from "./mentor/mentor-shared";
+export { messagesFromSnapshot } from "@/lib/mentor-messages";
 
 const CONNECTION_KEY = "mentor.connection";
 const PREFS_KEY = "mentor.prefs";
-const ATTACHMENT_NOTE =
-  "\n\nAttached files (read them with read_document, or ocr_image for photos and scans):\n";
 const STARTERS = [
   "Explain photosynthesis like I'm in 8th grade",
   "Quiz me on my notes",
   "Summarize this PDF",
   "Solve a quadratic step by step",
 ];
-
-/* -------------------------------------------------------------------------------------------------
- * Pi message -> chatcn part helpers
- * -----------------------------------------------------------------------------------------------*/
-
-interface PiBlock {
-  type?: string;
-  text?: string;
-  thinking?: string;
-  id?: string;
-  name?: string;
-  arguments?: unknown;
-}
-
-interface PiMessage {
-  role?: string;
-  content?: unknown;
-  toolCallId?: string;
-  toolName?: string;
-  isError?: boolean;
-  details?: unknown;
-  stopReason?: string;
-  errorMessage?: string;
-}
-
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((block): block is PiBlock => Boolean(block) && typeof block === "object")
-    .filter((block) => block.type === "text")
-    .map((block) => block.text ?? "")
-    .join("");
-}
-
-function resultText(result: unknown): string {
-  if (typeof result === "string") return result;
-  const content = record(result).content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((block): block is PiBlock => Boolean(block) && typeof block === "object")
-      .filter((block) => block.type === "text")
-      .map((block) => block.text ?? "")
-      .join("\n");
-  }
-  if (result && typeof result === "object") return JSON.stringify(result, null, 2);
-  return "";
-}
-
-function toolNameKey(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[\s.-]+/g, "_")
-    .toLowerCase();
-}
-
-/**
- * Pi returns `{ content, details }`. The chatcn renderers read structured fields, so map the
- * tool-specific details into the shape each renderer expects.
- */
-function normalizeOutput(name: string, result: unknown, isError: boolean): unknown {
-  const details = record(record(result).details);
-  const text = resultText(result);
-  const key = toolNameKey(name);
-  switch (key) {
-    case "bash":
-    case "shell":
-    case "run_command":
-      return { ...details, stdout: text, stderr: "", exitCode: isError ? 1 : 0 };
-    case "web_search":
-    case "search_web":
-      return {
-        results: Array.isArray(details.results) ? details.results : [],
-        total: typeof details.total === "number" ? details.total : undefined,
-        durationMs: typeof details.durationMs === "number" ? details.durationMs : undefined,
-      };
-    case "web_fetch": {
-      const excerpt =
-        typeof details.excerpt === "string" ? details.excerpt : text.slice(0, 4000);
-      return {
-        url: details.url,
-        status: details.status,
-        title: details.title,
-        excerpt,
-        content: excerpt,
-      };
-    }
-    case "read":
-    case "read_file":
-      return text;
-    case "edit":
-    case "edit_file":
-      return {
-        ...details,
-        diff: details.patch ?? details.diff,
-      };
-    case "write":
-    case "write_file":
-      return { ...details, ok: !isError };
-    default:
-      return { ...details, text };
-  }
-}
-
-function isTerminal(part: ChatcnToolPart): boolean {
-  return part.state === "output-available" || part.state === "output-error";
-}
-
-/** Turn a Pi transcript into chatcn messages: one assistant bubble per user turn. */
-export function messagesFromSnapshot(raw: unknown[]): ChatcnMessage[] {
-  const out: ChatcnMessage[] = [];
-  const toolParts = new Map<string, ChatcnToolPart>();
-  let assistant: ChatcnMessage | null = null;
-
-  raw.forEach((item, index) => {
-    const message = item as PiMessage;
-    if (message.role === "user") {
-      assistant = null;
-      out.push({
-        id: `snap-u-${index}`,
-        role: "user",
-        parts: [{ type: "text", text: textFromContent(message.content) }],
-      });
-      return;
-    }
-    if (message.role === "assistant") {
-      if (!assistant) {
-        assistant = { id: `snap-a-${index}`, role: "assistant", parts: [] };
-        out.push(assistant);
-      }
-      const blocks = Array.isArray(message.content) ? (message.content as PiBlock[]) : [];
-      for (const block of blocks) {
-        if (block.type === "text" && block.text) {
-          assistant.parts.push({ type: "text", text: block.text, state: "done" });
-        } else if (block.type === "thinking" && block.thinking) {
-          assistant.parts.push({ type: "reasoning", text: block.thinking, state: "done" });
-        } else if (block.type === "toolCall" && block.id && block.name) {
-          const part: ChatcnToolPart = {
-            type: `tool-${block.name}`,
-            toolCallId: block.id,
-            state: "input-available",
-            input: block.arguments,
-          };
-          assistant.parts.push(part);
-          toolParts.set(block.id, part);
-        }
-      }
-      return;
-    }
-    if (message.role === "toolResult" && message.toolCallId) {
-      const part = toolParts.get(message.toolCallId);
-      if (!part) return;
-      part.state = message.isError ? "output-error" : "output-available";
-      part.output = normalizeOutput(
-        message.toolName ?? part.type.slice(5),
-        message,
-        Boolean(message.isError),
-      );
-      if (message.isError) part.errorText = resultText(message);
-    }
-  });
-
-  return out;
-}
-
-/* -------------------------------------------------------------------------------------------------
- * Hook
- * -----------------------------------------------------------------------------------------------*/
-
-/** The text a forked session keeps from a turn. Tool traces are dropped on purpose. */
-function messageTextOf(message: ChatcnMessage): string {
-  return message.parts
-    .filter((part): part is ChatcnTextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("\n\n")
-    .trim();
-}
-
-interface RunState {
-  assistantId: string;
-  textPart: number | null;
-  reasoningPart: number | null;
-  tools: Map<string, number>;
-}
-
-let sequence = 0;
-const nextId = (prefix: string) => `${prefix}-${Date.now()}-${++sequence}`;
 
 export function useMentor() {
   const [url, setUrl] = useState("");
@@ -329,389 +138,30 @@ export function useMentor() {
     filesTimer.current = setTimeout(() => void refreshFiles(), 400);
   }, [refreshFiles]);
 
-  const closeStream = useCallback(() => {
-    esRef.current?.close();
-    esRef.current = null;
-  }, []);
-
-  /* ---------------------------------------------------------------- streaming reducer */
-
-  const ensureAssistant = useCallback((): ChatcnMessage => {
-    const current = runRef.current;
-    if (current) {
-      const found = messagesRef.current.find((message) => message.id === current.assistantId);
-      if (found) return found;
-    }
-    const message: ChatcnMessage = {
-      id: nextId("a"),
-      role: "assistant",
-      parts: [],
-    };
-    publish([...messagesRef.current, message]);
-    runRef.current = {
-      assistantId: message.id,
-      textPart: null,
-      reasoningPart: null,
-      tools: new Map(),
-    };
-    return message;
-  }, [publish]);
-
-  const appendDelta = useCallback(
-    (kind: "text" | "reasoning", delta: string) => {
-      const message = ensureAssistant();
-      const run = runRef.current;
-      if (!run) return;
-      let parts = message.parts;
-      let index = kind === "text" ? run.textPart : run.reasoningPart;
-      const existing = index === null ? undefined : parts[index];
-      if (
-        !existing ||
-        existing.type !== kind ||
-        (existing as { state?: string }).state !== "streaming"
-      ) {
-        index = parts.length;
-        parts = [...parts, { type: kind, text: "", state: "streaming" } as ChatcnPart];
-        if (kind === "text") run.textPart = index;
-        else run.reasoningPart = index;
-      }
-      const at = index as number;
-      parts = parts.map((part, i) =>
-        i === at
-          ? ({ ...part, text: `${(part as { text?: string }).text ?? ""}${delta}` } as ChatcnPart)
-          : part,
-      );
-      replaceMessage(message.id, { ...message, parts });
-    },
-    [ensureAssistant, replaceMessage],
-  );
-
-  const finishBlock = useCallback(
-    (kind: "text" | "reasoning", text: string) => {
-      const message = ensureAssistant();
-      const run = runRef.current;
-      if (!run) return;
-      const index = kind === "text" ? run.textPart : run.reasoningPart;
-      const existing = index === null ? undefined : message.parts[index];
-      if (
-        existing &&
-        existing.type === kind &&
-        (existing as { state?: string }).state === "streaming"
-      ) {
-        replaceMessage(message.id, {
-          ...message,
-          parts: message.parts.map((part, i) =>
-            i === index ? ({ ...part, text, state: "done" } as ChatcnPart) : part,
-          ),
-        });
-      } else if (text) {
-        replaceMessage(message.id, {
-          ...message,
-          parts: [...message.parts, { type: kind, text, state: "done" } as ChatcnPart],
-        });
-      }
-      if (kind === "text") run.textPart = null;
-      else run.reasoningPart = null;
-    },
-    [ensureAssistant, replaceMessage],
-  );
-
-  const upsertTool = useCallback(
-    (call: { id?: string; name?: string; arguments?: unknown }) => {
-      if (!call.id || !call.name) return;
-      const message = ensureAssistant();
-      const run = runRef.current;
-      if (!run) return;
-      const index = run.tools.get(call.id);
-      if (index !== undefined) {
-        const existing = message.parts[index] as ChatcnToolPart;
-        const next: ChatcnToolPart = {
-          ...existing,
-          type: `tool-${call.name}`,
-          input: call.arguments ?? existing.input,
-          state: isTerminal(existing) ? existing.state : "input-available",
-        };
-        replaceMessage(message.id, {
-          ...message,
-          parts: message.parts.map((part, i) => (i === index ? next : part)),
-        });
-        return;
-      }
-      const part: ChatcnToolPart = {
-        type: `tool-${call.name}`,
-        toolCallId: call.id,
-        state: "input-available",
-        input: call.arguments ?? {},
-      };
-      run.tools.set(call.id, message.parts.length);
-      replaceMessage(message.id, { ...message, parts: [...message.parts, part] });
-    },
-    [ensureAssistant, replaceMessage],
-  );
-
-  const settleTool = useCallback(
-    (event: Record<string, unknown>) => {
-      const id = typeof event.toolCallId === "string" ? event.toolCallId : "";
-      if (!id) return;
-      const message = ensureAssistant();
-      const run = runRef.current;
-      if (!run) return;
-      const name = typeof event.toolName === "string" ? event.toolName : "tool";
-      const isError = Boolean(event.isError);
-      const output = normalizeOutput(name, event.result, isError);
-      const index = run.tools.get(id);
-      if (index !== undefined) {
-        const existing = message.parts[index] as ChatcnToolPart;
-        const next: ChatcnToolPart = {
-          ...existing,
-          state: isError ? "output-error" : "output-available",
-          output,
-          errorText: isError ? resultText(event.result) : undefined,
-        };
-        replaceMessage(message.id, {
-          ...message,
-          parts: message.parts.map((part, i) => (i === index ? next : part)),
-        });
-      } else {
-        const part: ChatcnToolPart = {
-          type: `tool-${name}`,
-          toolCallId: id,
-          state: isError ? "output-error" : "output-available",
-          input: event.args ?? {},
-          output,
-          errorText: isError ? resultText(event.result) : undefined,
-        };
-        run.tools.set(id, message.parts.length);
-        replaceMessage(message.id, { ...message, parts: [...message.parts, part] });
-      }
-      scheduleFiles();
-    },
-    [ensureAssistant, replaceMessage, scheduleFiles],
-  );
-
-  const applyEvent = useCallback(
-    (event: Record<string, unknown>) => {
-      const type = event.type;
-      if (type === "message_start") {
-        const message = event.message as PiMessage | undefined;
-        if (message?.role === "user") {
-          const last = messagesRef.current[messagesRef.current.length - 1];
-          if (last?.role === "user") return;
-          publish([
-            ...messagesRef.current,
-            {
-              id: nextId("u"),
-              role: "user",
-              parts: [{ type: "text", text: textFromContent(message.content) }],
-            },
-          ]);
-          return;
-        }
-        if (message?.role === "assistant") {
-          const run = runRef.current;
-          if (run) {
-            run.textPart = null;
-            run.reasoningPart = null;
-          }
-          setStatus("streaming");
-        }
-        return;
-      }
-
-      if (type === "message_update") {
-        setStatus("streaming");
-        const usage = record(event.usage);
-        if (typeof usage.totalTokens === "number") setTokensUsed(usage.totalTokens);
-        const inner = typeof event.event === "string" ? event.event : "";
-        const delta = typeof event.delta === "string" ? event.delta : "";
-        if (inner === "text_delta" && delta) appendDelta("text", delta);
-        else if (inner === "thinking_delta" && delta) appendDelta("reasoning", delta);
-        else if (inner === "toolcall_end" && event.toolCall) {
-          const call = event.toolCall as { id?: string; name?: string; arguments?: unknown };
-          upsertTool(call);
-        }
-        return;
-      }
-
-      if (type === "message_end") {
-        const message = event.message as PiMessage | undefined;
-        if (message?.role !== "assistant") return;
-        const usage = record((message as { usage?: unknown }).usage);
-        if (typeof usage.totalTokens === "number") setTokensUsed(usage.totalTokens);
-        const blocks = Array.isArray(message.content) ? (message.content as PiBlock[]) : [];
-        for (const block of blocks) {
-          if (block.type === "text") finishBlock("text", block.text ?? "");
-          else if (block.type === "thinking") finishBlock("reasoning", block.thinking ?? "");
-          else if (block.type === "toolCall")
-            upsertTool({ id: block.id, name: block.name, arguments: block.arguments });
-        }
-        const run = runRef.current;
-        if (run) {
-          run.textPart = null;
-          run.reasoningPart = null;
-        }
-        if (message.stopReason === "error" && message.errorMessage) {
-          setChatError(message.errorMessage);
-          setStatus("error");
-        }
-        return;
-      }
-
-      if (type === "tool_execution_start") {
-        upsertTool({
-          id: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
-          name: typeof event.toolName === "string" ? event.toolName : undefined,
-          arguments: event.args,
-        });
-        setStatus("streaming");
-        return;
-      }
-
-      if (type === "tool_execution_end") {
-        settleTool(event);
-        return;
-      }
-
-      if (type === "agent_start") {
-        setStatus("streaming");
-        return;
-      }
-
-      if (type === "artifacts") {
-        const files = Array.isArray(event.files) ? (event.files as WorkspaceFile[]) : [];
-        if (!files.length) return;
-        const message = ensureAssistant();
-        const parts = message.parts.filter(
-          (part) =>
-            !(part.type === "data-artifacts" && (part as { id?: string }).id === "artifacts"),
-        );
-        replaceMessage(message.id, {
-          ...message,
-          parts: [
-            ...parts,
-            { type: "data-artifacts", id: "artifacts", data: { files } },
-          ],
-        });
-        return;
-      }
-
-      if (type === "agent_settled") {
-        publish(
-          messagesRef.current.map((message) =>
-            message.role === "assistant"
-              ? {
-                  ...message,
-                  parts: message.parts.map((part) =>
-                    (part.type === "text" || part.type === "reasoning") &&
-                    (part as { state?: string }).state === "streaming"
-                      ? ({ ...part, state: "done" } as ChatcnPart)
-                      : part,
-                  ),
-                }
-              : message,
-          ),
-        );
-        runRef.current = null;
-        setStatus("ready");
-        setLoadingSession(false);
-        void refreshSessions();
-        scheduleFiles();
-        return;
-      }
-
-      if (type === "model_switch") {
-        // The tutor hit a quota wall and moved to another free model. No error, just the new
-        // name in the menu and in the next session.
-        if (typeof event.to === "string") setModelState(event.to);
-        void refreshSessions();
-        return;
-      }
-
-      if (type === "error") {
-        setChatError(typeof event.message === "string" ? event.message : "Something went wrong");
-        setStatus("error");
-        setLoadingSession(false);
-      }
-    },
-    [
-      appendDelta,
-      ensureAssistant,
-      finishBlock,
-      publish,
-      refreshSessions,
-      replaceMessage,
-      scheduleFiles,
-      settleTool,
-      upsertTool,
-    ],
-  );
-
-  /* ---------------------------------------------------------------- connection */
-
-  const connectStream = useCallback(
-    (id: string, reset: boolean) => {
-      closeStream();
-      const api = clientRef.current;
-      if (!api) return;
-      if (reset) {
-        publish([]);
-        runRef.current = null;
-        setStatus("ready");
-        setChatError(null);
-        setFiles([]);
-        setTokensUsed(0);
-        setLoadingSession(true);
-      }
-      const source = new EventSource(api.eventsUrl(id));
-      esRef.current = source;
-      source.addEventListener("snapshot", (raw) => {
-        try {
-          const data = JSON.parse((raw as MessageEvent).data) as {
-            messages?: unknown[];
-            meta?: SessionMeta;
-            busy?: boolean;
-          };
-          publish(messagesFromSnapshot(data.messages ?? []));
-          // The run keeps going on the server while the app is backgrounded. Reconcile the
-          // working state with the snapshot so returning shows the run, not a dead chat.
-          if (data.busy === true) setStatus("streaming");
-          else if (data.busy === false) {
-            setStatus((current) =>
-              current === "streaming" || current === "submitted" ? "ready" : current,
-            );
-          }
-          if (data.meta?.model) {
-            modelRefValue.current = data.meta.model;
-            setModelState(data.meta.model);
-          }
-          if (data.meta?.thinkingLevel) {
-            levelRef.current = data.meta.thinkingLevel;
-            if (data.meta.thinkingLevel !== "off") lastThinkLevel.current = data.meta.thinkingLevel;
-            setThinkingLevelState(data.meta.thinkingLevel);
-          }
-          if (typeof data.meta?.webAccess === "boolean") {
-            searchRef.current = data.meta.webAccess;
-            setSearchEnabledState(data.meta.webAccess);
-          }
-          setLoadingSession(false);
-        } catch {
-          setLoadingSession(false);
-        }
-        const waiters = snapshotWaiters.current;
-        snapshotWaiters.current = [];
-        for (const resolve of waiters) resolve();
-        void refreshFiles(id);
-      });
-      source.onmessage = (raw) => {
-        try {
-          applyEvent(JSON.parse(raw.data) as Record<string, unknown>);
-        } catch {
-          // a malformed frame must not kill the stream
-        }
-      };
-    },
-    [applyEvent, closeStream, publish, refreshFiles],
-  );
+  const { connectStream, closeStream } = useMentorStream({
+    clientRef,
+    esRef,
+    messagesRef,
+    runRef,
+    modelRefValue,
+    levelRef,
+    lastThinkLevel,
+    searchRef,
+    snapshotWaiters,
+    publish,
+    replaceMessage,
+    scheduleFiles,
+    refreshSessions,
+    refreshFiles,
+    setStatus,
+    setTokensUsed,
+    setChatError,
+    setLoadingSession,
+    setModelState,
+    setThinkingLevelState,
+    setSearchEnabledState,
+    setFiles,
+  });
 
   const openSession = useCallback(
     (id: string) => {
@@ -880,11 +330,20 @@ export function useMentor() {
       const id = await ensureSession();
       if (!id) return;
 
-      let payload = trimmed || "Please read the attached file and help me with it.";
-      if (attachments.length) {
-        payload +=
-          ATTACHMENT_NOTE + attachments.map((item) => `- ${item.path}`).join("\n");
+      // Same text sent twice in a row (for example a double tap) is one turn, not two.
+      const last = messagesRef.current[messagesRef.current.length - 1];
+      if (!attachments.length && last?.role === "user") {
+        const previous = last.parts
+          .filter((part): part is ChatcnTextPart => part.type === "text")
+          .map((part) => part.text)
+          .join("\n\n")
+          .trim();
+        if (previous === trimmed) return;
       }
+
+      const pending = attachments;
+      const bubble = trimmed || "Read the attached file.";
+      const outgoing = trimmed || "Please read the attached file and help me with it.";
       setAttachments([]);
 
       publish([
@@ -892,14 +351,24 @@ export function useMentor() {
         {
           id: nextId("u"),
           role: "user",
-          parts: [{ type: "text", text: trimmed || "Read the attached file." }],
+          parts: [{ type: "text", text: bubble }],
         },
       ]);
       runRef.current = null;
       setChatError(null);
       setStatus("submitted");
       try {
-        await api.prompt(id, payload);
+        // Photos are sent as vision input by the server; other files come back as a
+        // path note the model reads with a tool. The bubble above stays as typed.
+        await api.prompt(
+          id,
+          outgoing,
+          pending.map((item) => ({
+            path: item.path,
+            previewPath: item.previewPath,
+            name: item.name,
+          })),
+        );
       } catch (cause) {
         setChatError(cause instanceof Error ? cause.message : String(cause));
         setStatus("error");

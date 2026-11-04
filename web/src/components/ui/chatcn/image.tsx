@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Button, buttonVariants } from "@/components/ui/chatcn/button"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/chatcn/dialog"
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/chatcn/dialog"
 import { Tooltip } from "@/components/ui/chatcn/tooltip"
 import {
   ChevronLeftIcon,
@@ -8,6 +8,7 @@ import {
   DownloadIcon,
   ImageOffIcon,
   RotateCcwIcon,
+  XIcon,
 } from "@/lib/chatcn-icons"
 import { cn } from "@/lib/utils"
 
@@ -17,6 +18,8 @@ import { cn } from "@/lib/utils"
 
 interface ImageSource {
   src: string
+  /** Tried once when `src` cannot be decoded, for example a preview JPEG that failed. */
+  fallbackSrc?: string
   /** Required. Describe what the image shows, not that it is an image. */
   alt: string
   /** Intrinsic size. Sets the placeholder's aspect ratio so nothing shifts when it loads. */
@@ -110,6 +113,26 @@ function useImageStatus(src: string, onStatusChange?: (status: ImageStatus) => v
  * Lightbox
  * -----------------------------------------------------------------------------------------------*/
 
+/** The stage image, with one fallback to the original when a preview JPEG fails. */
+function LightboxImage({ image }: { image: ImageSource }) {
+  const [src, setSrc] = React.useState(image.src)
+  React.useEffect(() => setSrc(image.src), [image.src])
+  return (
+    <img
+      key={src}
+      src={src}
+      alt={image.alt}
+      width={image.width}
+      height={image.height}
+      draggable={false}
+      onError={() => {
+        if (image.fallbackSrc && src !== image.fallbackSrc) setSrc(image.fallbackSrc)
+      }}
+      className="rounded-chatcn-md max-h-full max-w-full object-contain select-none"
+    />
+  )
+}
+
 interface ImageLightboxProps {
   images: ImageSource[]
   /** Index of the image on show. */
@@ -145,9 +168,14 @@ function ImageLightbox({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         size="full"
+        showClose={false}
         initialFocus={stageRef}
         data-slot="image-lightbox"
         className="bg-chatcn-bg"
+        style={{
+          paddingTop: "var(--safe-top, 0px)",
+          paddingBottom: "var(--safe-bottom, 0px)",
+        }}
         onKeyDown={(event) => {
           if (!many) return
           const rtl = getComputedStyle(event.currentTarget).direction === "rtl"
@@ -162,7 +190,7 @@ function ImageLightbox({
           }
         }}
       >
-        <div className="flex h-13 shrink-0 items-center gap-3 ps-5 pe-14">
+        <div className="flex h-13 shrink-0 items-center gap-3 ps-5 pe-4">
           <DialogTitle className="chatcn-text-14 min-w-0 flex-1 truncate font-medium">
             {current.caption ?? current.alt}
           </DialogTitle>
@@ -171,6 +199,7 @@ function ImageLightbox({
               {index + 1} of {count}
             </span>
           ) : null}
+          {/* Download and close sit in the same row at the same size, so they line up. */}
           {download ? (
             <Tooltip content="Download image">
               <a
@@ -186,6 +215,15 @@ function ImageLightbox({
               </a>
             </Tooltip>
           ) : null}
+          <DialogClose
+            aria-label="Close"
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon-sm" }),
+              "pointer-coarse:size-11",
+            )}
+          >
+            <XIcon />
+          </DialogClose>
         </div>
 
         <div
@@ -193,15 +231,7 @@ function ImageLightbox({
           tabIndex={-1}
           className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-4 outline-none sm:px-16"
         >
-          <img
-            key={current.src}
-            src={current.src}
-            alt={current.alt}
-            width={current.width}
-            height={current.height}
-            draggable={false}
-            className="rounded-chatcn-md max-h-full max-w-full object-contain select-none"
-          />
+          <LightboxImage image={current} />
           {many ? (
             <>
               <Button

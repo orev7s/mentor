@@ -8,6 +8,7 @@ import {
   createAgentSession,
   type AgentSession,
   type AgentSessionEvent,
+  type PromptOptions,
 } from "@earendil-works/pi-coding-agent";
 import { ensureDirs, paths } from "../config.js";
 import { listWorkspaceFiles } from "../files.js";
@@ -85,6 +86,9 @@ export interface SessionMeta {
   createdAt: number;
   updatedAt: number;
 }
+
+/** Vision inputs attached to one prompt. */
+type PromptImages = NonNullable<PromptOptions["images"]>;
 
 /** Prior turns replayed into a fresh session when forking. Text only. */
 export interface SeedMessage {
@@ -233,6 +237,8 @@ export class TutorSession {
   private runStartedAt: number | null = null;
   /** Text of the turn in flight, so a quota failover can replay it on another model. */
   private lastPromptText = "";
+  /** Vision inputs of the turn in flight, replayed with the text on a failover. */
+  private lastPromptImages: PromptImages = [];
   /** A quota error we swallowed, waiting to be retried on another model when the run settles. */
   private quotaError: string | null = null;
   /** One failover per turn. A second quota error just surfaces. */
@@ -427,23 +433,32 @@ export class TutorSession {
     return { meta: this.meta, messages: this.session.messages, busy: this.busy || this.nudging };
   }
 
-  async prompt(text: string): Promise<unknown> {
-    if (this.busy || this.nudging) return this.session.followUp(text);
+  /** True when the model in use accepts image input, so a photo can be sent as vision. */
+  supportsImages(): boolean {
+    return this.session.model?.input?.includes("image") ?? false;
+  }
+
+  async prompt(text: string, images: PromptImages = []): Promise<unknown> {
+    if (this.busy || this.nudging) {
+      return images.length ? this.session.followUp(text, images) : this.session.followUp(text);
+    }
     this.busy = true;
     this.lastPromptText = text;
+    this.lastPromptImages = images;
     this.failoverTried = false;
     this.quotaError = null;
     this.turnTodos = null;
     this.todoNudged = false;
     await this.preflightModel();
-    return this.run(text);
+    return this.run(text, images);
   }
 
   /** One turn: no busy flip, so a failover can replay it while the session stays busy. */
-  private run(text: string): Promise<unknown> {
+  private run(text: string, images: PromptImages = this.lastPromptImages): Promise<unknown> {
     this.runStartedAt = Date.now();
+    const options: PromptOptions | undefined = images.length ? { images } : undefined;
     return this.session
-      .prompt(text)
+      .prompt(text, options)
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         this.publish({ type: "error", message });

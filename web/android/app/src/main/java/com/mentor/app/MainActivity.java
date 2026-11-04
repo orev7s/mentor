@@ -6,6 +6,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.webkit.CookieManager;
+import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
 import android.webkit.WebView;
 
@@ -81,6 +82,13 @@ public class MainActivity extends BridgeActivity {
         // quietly saves a blob as `download.bin`.
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+            // The listener often reports a generic type. Fall back to the file extension so
+            // Android stores, and later opens, a PDF or DOCX as itself.
+            if (mimeType == null || mimeType.isEmpty() || "application/octet-stream".equals(mimeType)) {
+                String guessed = guessMime(fileName);
+                if (guessed != null) mimeType = guessed;
+            }
             if (mimeType != null) {
                 request.setMimeType(mimeType);
             }
@@ -91,7 +99,6 @@ public class MainActivity extends BridgeActivity {
             if (userAgent != null) {
                 request.addRequestHeader("User-Agent", userAgent);
             }
-            String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
             request.setTitle(fileName);
             request.setDescription(fileName);
             request.allowScanningByMediaScanner();
@@ -103,6 +110,41 @@ public class MainActivity extends BridgeActivity {
                 manager.enqueue(request);
             }
         });
+    }
+
+    /**
+     * The Android back button. Give the web UI first refusal so it can close an
+     * overlay, then walk back through the WebView's own history, and only then
+     * send the app to the background instead of killing it.
+     */
+    @Override
+    public void onBackPressed() {
+        WebView webView = getBridge().getWebView();
+        if (webView == null) {
+            moveTaskToBack(true);
+            return;
+        }
+        webView.evaluateJavascript(
+            "window.__mentorHandleBack ? (window.__mentorHandleBack() ? '1' : '0') : '0'",
+            value -> {
+                boolean handled = value != null && value.contains("1");
+                if (handled) return;
+                if (webView.canGoBack()) {
+                    webView.goBack();
+                } else {
+                    moveTaskToBack(true);
+                }
+            }
+        );
+    }
+
+    /** MIME type from a file name, or null when the extension is unknown. */
+    private static String guessMime(String fileName) {
+        if (fileName == null) return null;
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) return null;
+        String ext = fileName.substring(dot + 1).toLowerCase();
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
     }
 
     private void injectInsets(WebView view) {

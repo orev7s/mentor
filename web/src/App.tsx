@@ -7,6 +7,7 @@ import { SettingsDialog } from "@/components/SettingsDialog";
 import { DownloadToast, type SavedFile } from "@/components/DownloadToast";
 import { MentorAgent, todosFrom } from "@/components/mentor-agent";
 import type { TodoItem } from "@/components/ui/chatcn/todo-list";
+import { useBackHandler } from "@/lib/back";
 import { PanelLeftIcon, XIcon } from "@/lib/chatcn-icons";
 import { getToolName, isToolPart, type ChatcnMessage } from "@/lib/chatcn-types";
 import {
@@ -45,6 +46,8 @@ function mergedTodos(messages: ChatcnMessage[]): TodoItem[] {
 export default function App() {
   const mentor = useMentor();
   const [railOpen, setRailOpen] = useState(false);
+  // Android back closes the chat drawer instead of leaving the app.
+  useBackHandler(railOpen, () => setRailOpen(false));
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);

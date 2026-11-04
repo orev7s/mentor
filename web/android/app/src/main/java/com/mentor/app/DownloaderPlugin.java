@@ -8,6 +8,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
 import android.webkit.CookieManager;
+import android.webkit.MimeTypeMap;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -44,6 +45,19 @@ public class DownloaderPlugin extends Plugin {
         String cookies = CookieManager.getInstance().getCookie(url);
         if (cookies != null) {
             request.addRequestHeader("Cookie", cookies);
+        }
+        // Without a MIME type DownloadManager stores the file as application/octet-stream,
+        // so Android's chooser cannot offer a PDF reader or a document editor for it.
+        String mime = call.getString("mime");
+        if (mime == null || mime.isEmpty()) {
+            int dot = filename.lastIndexOf('.');
+            if (dot >= 0 && dot < filename.length() - 1) {
+                mime = MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(filename.substring(dot + 1).toLowerCase());
+            }
+        }
+        if (mime != null && !mime.isEmpty()) {
+            request.setMimeType(mime);
         }
         request.setTitle(filename);
         request.setDescription(filename);

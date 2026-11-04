@@ -185,8 +185,15 @@ export class ApiClient {
     return this.request<{ ok: boolean }>("DELETE", `/sessions/${id}`);
   }
 
-  prompt(id: string, text: string) {
-    return this.request<{ ok: boolean }>("POST", `/sessions/${id}/prompt`, { text });
+  prompt(
+    id: string,
+    text: string,
+    attachments: Array<{ path: string; previewPath?: string; name?: string }> = [],
+  ) {
+    return this.request<{ ok: boolean }>("POST", `/sessions/${id}/prompt`, {
+      text,
+      ...(attachments.length ? { attachments } : {}),
+    });
   }
 
   abort(id: string) {

@@ -1,6 +1,7 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import * as React from "react"
 import { buttonVariants } from "@/components/ui/chatcn/button"
+import { useBackHandler } from "@/lib/back"
 import { XIcon } from "@/lib/chatcn-icons"
 import { cn } from "@/lib/utils"
 
@@ -23,14 +24,21 @@ function isKeyboardEvent(event: Event | undefined) {
 
 type DialogProps = React.ComponentProps<typeof DialogPrimitive.Root>
 
-function Dialog({ onOpenChange, ...props }: DialogProps) {
+function Dialog({ onOpenChange, open, ...props }: DialogProps) {
   const [instant, setInstant] = React.useState(false)
+  const close = React.useCallback(
+    () => onOpenChange?.(false, { reason: "escape-key" } as never),
+    [onOpenChange],
+  )
+  // Android back closes the topmost dialog instead of leaving the app.
+  useBackHandler(Boolean(open), close)
   return (
     <InstantContext.Provider value={instant}>
       <DialogPrimitive.Root
-        onOpenChange={(open, details) => {
+        open={open}
+        onOpenChange={(next, details) => {
           setInstant(isKeyboardEvent(details.event))
-          onOpenChange?.(open, details)
+          onOpenChange?.(next, details)
         }}
         {...props}
       />

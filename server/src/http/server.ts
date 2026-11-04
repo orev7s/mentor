@@ -14,6 +14,11 @@ import { AgentManager } from "../agent/manager.js";
 import { listModels, resetRuntime } from "../agent/runtime.js";
 import { MIME, listWorkspaceFiles } from "../files.js";
 import {
+  ATTACHMENT_NOTE,
+  collectPromptAttachments,
+  type PromptAttachment,
+} from "../prompt-attachments.js";
+import {
   PRESETS,
   apiKeyFor,
   buildCustomProvider,
@@ -62,19 +67,13 @@ async function makeImagePreviews(
   const previewDir = join(uploadsDir, ".previews");
   const thumbName = `${safeName}.thumb.jpg`;
   const previewName = `${safeName}.preview.jpg`;
+  const thumb = join(previewDir, thumbName);
+  const preview = join(previewDir, previewName);
   try {
     mkdirSync(previewDir, { recursive: true });
     await Promise.all([
-      run(
-        "magick",
-        [target, "-auto-orient", "-thumbnail", "480x480>", "-strip", "-quality", "82", join(previewDir, thumbName)],
-        { timeout: 20_000 },
-      ),
-      run(
-        "magick",
-        [target, "-auto-orient", "-thumbnail", "1600x1600>", "-strip", "-quality", "85", join(previewDir, previewName)],
-        { timeout: 30_000 },
-      ),
+      convertImage(target, thumb, "480x480>", "82", 20_000),
+      convertImage(target, preview, "1600x1600>", "85", 30_000),
     ]);
     return {
       thumbPath: `uploads/.previews/${thumbName}`,
@@ -82,6 +81,34 @@ async function makeImagePreviews(
     };
   } catch {
     return {};
+  }
+}
+
+/**
+ * One ImageMagick decode. ImageMagick 7 ships `magick`; older installs only have
+ * `convert`. Try both so a phone photo still gets a JPEG the WebView can decode.
+ */
+async function convertImage(
+  source: string,
+  output: string,
+  size: string,
+  quality: string,
+  timeout: number,
+): Promise<void> {
+  const args = [
+    source,
+    "-auto-orient",
+    "-thumbnail",
+    size,
+    "-strip",
+    "-quality",
+    quality,
+    output,
+  ];
+  try {
+    await run("magick", args, { timeout });
+  } catch {
+    await run("convert", args, { timeout });
   }
 }
 
@@ -283,16 +310,41 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
   app.post(
     "/sessions/:id/prompt",
     asyncHandler(async (req, res) => {
-      const text = req.body?.text;
-      if (typeof text !== "string" || !text.trim()) {
-        res.status(400).json({ error: "text is required" });
+      const rawText = req.body?.text;
+      const text = typeof rawText === "string" ? rawText.trim() : "";
+      const attachments: PromptAttachment[] = Array.isArray(req.body?.attachments)
+        ? (req.body.attachments as unknown[]).flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const value = item as Record<string, unknown>;
+            return [
+              {
+                path: typeof value.path === "string" ? value.path : undefined,
+                previewPath:
+                  typeof value.previewPath === "string" ? value.previewPath : undefined,
+                name: typeof value.name === "string" ? value.name : undefined,
+              },
+            ];
+          })
+        : [];
+      if (!text && !attachments.length) {
+        res.status(400).json({ error: "text or attachments are required" });
         return;
       }
       const session = await manager.get(String(req.params.id));
+
+      // Photos go to the model as vision input; everything else stays a path the
+      // agent reads with a tool. The note is a wire detail, not a second user turn.
+      const { images, notes } = await collectPromptAttachments(
+        session.meta.cwd,
+        attachments,
+        session.supportsImages(),
+      );
+      const payload = text + (notes.length ? ATTACHMENT_NOTE + notes.join("\n") : "");
+
       if (session.meta.title === "New chat") {
-        manager.rename(session.meta.id, text.trim().slice(0, 60));
+        manager.rename(session.meta.id, (text || "New chat").slice(0, 60));
       }
-      void session.prompt(text);
+      void session.prompt(payload, images);
       res.status(202).json({ ok: true });
     }),
   );
