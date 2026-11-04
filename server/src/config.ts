@@ -60,7 +60,7 @@ export function loadConfig(): ServerConfig {
   const config: ServerConfig = {
     token: generateToken(),
     host: process.env.MENTOR_HOST ?? "0.0.0.0",
-    port: Number(process.env.MENTOR_PORT ?? 8787),
+    port: Number(process.env.MENTOR_PORT ?? 8790),
     createdAt: new Date().toISOString(),
     defaultThinkingLevel: "medium",
   };

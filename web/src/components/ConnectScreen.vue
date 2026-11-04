@@ -26,7 +26,7 @@ async function submit() {
             v-model="url"
             data-testid="server-url"
             autocomplete="off"
-            placeholder="http://1.2.3.4:8787"
+            placeholder="http://1.2.3.4:8790"
             class="mt-1.5 w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[14px] text-ink outline-none placeholder:text-faint focus:border-accent"
           />
         </label>
