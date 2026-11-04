@@ -13,6 +13,7 @@ import { listModels, resetRuntime } from "../agent/runtime.js";
 import { MIME, listWorkspaceFiles } from "../files.js";
 import {
   PRESETS,
+  apiKeyFor,
   buildCustomProvider,
   providerIdsWithKey,
   readModelsFile,
@@ -348,6 +349,56 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
       res.sendFile(abs, { dotfiles: "allow" });
     }),
   );
+
+  // --- voice ---
+
+  /** Speech to text through Groq Whisper. The key stays on the server. */
+  app.post("/transcribe", upload.single("file"), asyncHandler(async (req, res) => {
+    const key = apiKeyFor("groq");
+    if (!key) {
+      res.status(400).json({
+        error: "Voice input needs a Groq API key. Add one in Settings, under Providers.",
+      });
+      return;
+    }
+    if (!req.file?.buffer?.length) {
+      res.status(400).json({ error: "An audio file is required" });
+      return;
+    }
+    const language = typeof req.body?.language === "string" ? req.body.language.slice(0, 2) : "";
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([new Uint8Array(req.file.buffer)], { type: req.file.mimetype || "audio/webm" }),
+      req.file.originalname || "voice.webm",
+    );
+    form.append("model", "whisper-large-v3-turbo");
+    form.append("response_format", "json");
+    if (language) form.append("language", language);
+
+    let upstream: Awaited<ReturnType<typeof fetch>>;
+    try {
+      upstream = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}` },
+        body: form,
+      });
+    } catch (error) {
+      res.status(502).json({
+        error: `Could not reach the transcription service: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return;
+    }
+    if (!upstream.ok) {
+      const detail = (await upstream.text().catch(() => "")).slice(0, 300);
+      res.status(502).json({
+        error: `Transcription failed (${upstream.status})${detail ? `: ${detail}` : "."}`,
+      });
+      return;
+    }
+    const data = (await upstream.json()) as { text?: string };
+    res.json({ text: (data.text ?? "").trim() });
+  }));
 
   // --- uploads ---
 

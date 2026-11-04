@@ -26,8 +26,8 @@ LLM providers (OpenRouter, Kilo Gateway, Groq, Cerebras, Gemini, custom OpenAI-c
   provider/model configuration, and the access token. Everything the app knows
   about providers is stored here, not on the phone.
 - **Web UI** (`web/`): React 19 + Vite + Tailwind 4, with shadcn and the
-  chatcn agent components. Chat, tool calls, todos, terminal, diffs, files,
-  model picker, providers settings. Built into the app bundle.
+  chatcn agent components. Chat, tool calls, todos, diffs, files, voice, model
+  picker, providers settings. Built into the app bundle.
 - **Android** (`web/android/`): Capacitor shell around the built web assets.
 
 ## Auth and setup
@@ -82,6 +82,7 @@ Sessions:
 | POST | `/sessions/:id/answers` | `{ toolCallId, answers }` resolves a waiting `ask_student` call |
 | POST | `/sessions/:id/abort` | Stop the current run |
 | POST | `/uploads` | Multipart `file` + `sessionId`, saved into the workspace |
+| POST | `/transcribe` | Multipart `file` (audio) + optional `language`; Groq Whisper returns `{ text }` |
 
 ## Streaming
 
@@ -96,6 +97,8 @@ shape over SSE:
 - `artifacts` carries `{ files }` for every file created or changed in the run,
   sent just before `agent_settled`. The client renders it as a download card at
   the end of the assistant message.
+- `model_switch` carries `{ from, to, reason }` when a quota failover moved the
+  session to another model. The client updates the model name silently.
 - `error` carries a message string.
 
 The client renders text deltas as they arrive and replaces the buffer with the
@@ -138,23 +141,36 @@ card renders again and the broker still holds the wait.
 ## App shell
 
 - Mobile first and deliberately plain: no top bar and no tab strip. The thread
-  fills the screen, the composer sits at the bottom, and three floating buttons
-  sit over a short top gradient. One opens the chat drawer, one starts a new
-  chat, and one overflow menu holds Files, Changes, Terminal, Model and
-  Settings.
-- Files, changes and terminal open as a sheet over the chat. On phones it slides
-  up from the bottom; on wide screens it is a right drawer. It never opens by
-  itself: activity only selects which view the sheet will show when the student
-  opens it.
+  fills the screen, the composer sits at the bottom, and the floating buttons
+  sit over a short top gradient: the chat list on the left, then voice, new chat
+  and an overflow menu with Files, Changes, Model and Settings.
+- The sidebar is a ChatGPT-style rail: `Mentor` and a search button, inert
+  Projects and Scheduled rows, a divider, the recent chats with "See all...",
+  and a footer with a Chat pill and the voice button.
+- Files and changes open as a sheet over the chat. On phones it slides up from
+  the bottom; on wide screens it is a right drawer. It never opens by itself:
+  activity only selects which view the sheet will show when the student opens
+  it. There is no terminal view: bash calls stay in the thread as tool rows.
+- While a run is in flight a `working` row sits under the thread for every
+  model, thinking or not. It shows a shimmering "Working", the current step
+  ("Running a command", "Searching the web", "Waiting for your answer") and the
+  elapsed time, so instant tool calls never look like nothing happened.
 - Messages share one centered column. The student's turns keep a filled bubble,
   the agent's stay flat, and both are centered rather than pinned to opposite
-  edges. Every message has Copy; every message has Fork from here.
+  edges. Every message has Copy; every message has Fork from here; every agent
+  reply has Read aloud.
+- Voice: the mic records in the WebView, the server sends the clip to Groq
+  Whisper (`POST /transcribe`) and the text lands in the composer. It works in
+  Turkish, Arabic and English. Read aloud uses the platform voice through
+  `speechSynthesis`, which is the Android TTS engine in the WebView, and picks a
+  voice from the script of the text. Without a Groq key the mic says so instead
+  of failing silently.
 - Forking at a user turn seeds a new session with the turns before it and
   resends that text. Forking at an assistant turn seeds through that reply and
   leaves the new chat ready for the next question. Seeds are text only: Pi is
   given real user and assistant messages, never a tool call without its result.
-- The composer keeps only attach and send. Model and provider settings live in
-  the overflow menu, so the chat has one obvious place to type.
+- The composer keeps only attach, voice and send. Model and provider settings
+  live in the overflow menu, so the chat has one obvious place to type.
 - Downloads on Android go through a `Downloader` plugin that hands the URL to
   the system `DownloadManager`. The server sends `Content-Disposition` with the
   real name and extension, so a PDF lands as `report.pdf` in Downloads. The
@@ -185,9 +201,28 @@ whose `:free` models work with no account. Default model `kilo-auto/free`.
 Custom provider fields: id, display name, base URL, API (`openai-completions` by
 default), API key, and a list of models with context window and max output tokens.
 
+### Free-model failover
+
+If a turn ends with a quota error (`insufficient_quota`, "quota exceeded",
+"out of budget", "available balance", billing or 402 wording), the server does
+not surface it:
+
+1. The failed model goes on a six hour bench (`quota-bench.json` in the data
+   dir), so later turns skip it.
+2. It picks the best configured fallback: a model whose id or name says "free"
+   first, then a free-tier provider (OpenRouter, Kilo, Groq, Cerebras, Gemini),
+   then any other configured model. The failed model is excluded.
+3. It switches the session, rewinds the leaf to before the last student turn so
+   the replay is one clean user message, and re-runs the turn.
+4. It emits `model_switch` instead of `error`. The client updates the model name
+   with no dialog.
+
+If nothing else is configured, the quota error is shown as before. Picking a
+model by hand lifts its bench.
+
 ## Not in v1
 
 - Multi-user accounts. One token, one student.
 - Background push notifications.
-- Audio input, image generation.
+- Image generation.
 - Authentication beyond a bearer token (put it behind HTTPS for public access).

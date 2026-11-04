@@ -14,15 +14,17 @@ A Pi-backed tutor agent for one student, used from an Android app.
 
 The chat surface is deliberately plain, closer to ChatGPT than to a coding
 agent. There is no top bar and no tab strip: the thread fills the screen, the
-composer sits at the bottom, and three floating buttons do the rest. One opens
-the chat list, one starts a new chat, and the overflow menu holds Files,
-Changes, Terminal, the model picker and settings. Files, changes and terminal
-open as a sheet over the chat, only when the student asks for them.
+composer sits at the bottom, and floating buttons do the rest. The chat list
+opens a sidebar with search, recent chats and a footer; the overflow menu holds
+Files, Changes, the model picker and settings. There is no terminal view: bash
+calls stay in the thread.
 
 - streaming Markdown (code, tables, math), reasoning, and every tool call
 - a pinned todo list the agent writes with `todo_write`, plus the same plan in
   the thread
-- a Terminal sheet fed by every `bash` command, live output and exit code
+- a working row under the thread while a run is in flight, for every model:
+  "Working" with the current step and elapsed time, so instant tool calls never
+  look like nothing is happening
 - a Changes sheet with diffs for `write`/`edit`
 - a Files sheet listing uploads and generated PDFs, notes, worksheets and
   scripts, with preview and download
@@ -30,6 +32,9 @@ open as a sheet over the chat, only when the student asks for them.
   waits on. The student picks answers, sends them, and the agent continues in
   the same run. Use it when the student asks to be quizzed or when the agent
   needs a decision before it starts
+- voice: a mic records a clip, the server transcribes it with Groq Whisper, and
+  the text lands in the composer. Turkish, Arabic and English. Every reply has
+  Read aloud, using the platform voice
 - attachments in the composer (PDF, DOCX, images, text) that the agent reads with
   `read_document`/`ocr_image`
 - at the end of every run, a card listing the files that run created or changed,
@@ -37,7 +42,12 @@ open as a sheet over the chat, only when the student asks for them.
 - `share_file` cards, where the agent points at one deliverable and offers it
 - a download notice at the top of the screen that says it started, then saved,
   with Open
-- copy on every message, and Fork from here to branch a chat at any turn
+- copy on every message, Read aloud on every agent reply, and Fork from here to
+  branch a chat at any turn
+
+When a free model runs out of quota, the server benches it and moves the chat to
+another configured free model on its own, then replays the turn. The student
+sees the model name change, not an error. `docs/SPEC.md` has the details.
 
 The layout is mobile first. Tap targets grow on touch. The floating buttons and
 composer clear the system bars and the keyboard through insets pushed from
@@ -133,11 +143,16 @@ npm run ui-test
 ```
 
 It connects, sends a prompt that plans with `todo_write`, writes a file and runs
-`bash`, then captures the chat, Files, Changes, Terminal, model picker,
-settings, workspace sheet, tablet, fork and phone screens into
+`bash`, then captures the chat, the working row, Files, Changes, model picker,
+settings, sidebar, workspace sheet, tablet, fork and phone screens into
 `docs/screenshots/`. A failing run leaves `99-failure.png` behind; a passing run
 removes it.
 
 `npm run ask-test` covers `ask_student` end to end: it asks for two questions,
 picks one option in each, sends the answers, and waits for the agent to finish
 the same run. Its screenshots go to `/tmp/opencode`.
+
+`npm run test:failover` in `server/` starts a mock provider that refuses the
+first model with a quota error, then checks that the run switches to the free
+model, shows no error, and answers. It runs on its own port with a throwaway
+data dir, so it does not touch the dev server.

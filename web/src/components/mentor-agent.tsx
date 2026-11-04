@@ -28,6 +28,7 @@ import {
   PromptInputActions,
   PromptInputAttachButton,
   PromptInputAttachments,
+  PromptInputButton,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
@@ -36,8 +37,8 @@ import {
 import { type QueuedMessage, QueuedMessages } from "@/components/ui/chatcn/queued-messages"
 import { Reasoning, reasoningPropsFromPart } from "@/components/ui/chatcn/reasoning"
 import { ScrollToBottom } from "@/components/ui/chatcn/scroll-to-bottom"
+import { ShimmerText } from "@/components/ui/chatcn/shimmer-text"
 import { Spinner } from "@/components/ui/chatcn/spinner"
-import { Terminal } from "@/components/ui/chatcn/terminal"
 import { type TodoItem, TodoList } from "@/components/ui/chatcn/todo-list"
 import { toolBashRenderers } from "@/components/ui/chatcn/tool-bash"
 import { ToolCall } from "@/components/ui/chatcn/tool-call"
@@ -57,6 +58,7 @@ import { toolWebSearchRenderers } from "@/components/ui/chatcn/tool-web-search"
 import { TooltipProvider } from "@/components/ui/chatcn/tooltip"
 import { Trace, TraceStep } from "@/components/ui/chatcn/trace"
 import { TraceGroup } from "@/components/ui/chatcn/trace-group"
+import { formatChatcnDuration, useChatcnElapsed } from "@/hooks/use-chatcn-elapsed"
 import { type DiffFile, diffText, parsePatch } from "@/lib/chatcn-diff"
 import {
   ArtifactIcon,
@@ -72,11 +74,14 @@ import {
   GitForkIcon,
   ImageIcon,
   ListChecksIcon,
+  MicIcon,
+  MicOffIcon,
   ModelIcon,
   RefreshCwIcon,
   SettingsIcon,
   SquarePenIcon,
-  SquareTerminalIcon,
+  Volume2Icon,
+  VolumeXIcon,
   XIcon,
 } from "@/lib/chatcn-icons"
 import {
@@ -90,6 +95,7 @@ import {
   isToolPart,
 } from "@/lib/chatcn-types"
 import { type Attachment, formatBytes, type WorkspaceFile } from "@/lib/api"
+import { type Recording, speak, speechSupported, startRecording, stopSpeaking } from "@/lib/voice"
 import { cn } from "@/lib/utils"
 
 /* -------------------------------------------------------------------------------------------------
@@ -99,19 +105,8 @@ import { cn } from "@/lib/utils"
 /** Request status, identical to AI SDK `useChat().status`. */
 type CodingAgentStatus = "ready" | "submitted" | "streaming" | "error"
 
-/** The workspace tabs. On narrow screens they sit next to Chat in one tab bar. */
-type CodingWorkspaceTab = "changes" | "terminal" | "files"
-
-/** The shell session the agent drives, as one stream of text with escape codes. */
-interface CodingTerminalState {
-  /** Every command with its output, prompts included. */
-  text: string
-  /** The command running now, or the last one. */
-  command?: string
-  cwd?: string
-  running: boolean
-  exitCode?: number | null
-}
+/** The workspace tabs. Files and changed files open in one sheet. */
+type CodingWorkspaceTab = "changes" | "files"
 
 /** Everything the workspace shows, derived from the tool calls in the thread. */
 interface CodingWorkspace {
@@ -121,7 +116,6 @@ interface CodingWorkspace {
   pendingPaths: string[]
   /** Paths whose patch is still streaming in. */
   streamingPaths: string[]
-  terminal: CodingTerminalState
   /** The latest todo list the agent wrote. */
   todos: TodoItem[]
   /**
@@ -209,6 +203,15 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
     answers: AskAnswerInput[],
   ) => void | Promise<void>
 
+  /**
+   * Transcribe a recorded clip to text. Supplied by the app so the provider key stays on the
+   * server. When missing, the voice buttons are hidden.
+   */
+  onTranscribe?: (audio: Blob, language?: string) => Promise<string>
+
+  /** Bumping this starts a voice recording, so the sidebar button can drive the composer. */
+  voiceSignal?: number
+
   /** Starter prompts on the first screen. Up to four. */
   suggestions?: { label: string; prompt?: string }[]
   onSuggestion?: (prompt: string) => void
@@ -232,7 +235,6 @@ const toolKey = (part: ChatcnToolPart) =>
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[\s.-]+/g, "_")
     .toLowerCase()
-
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -242,12 +244,6 @@ function record(value: unknown): Record<string, unknown> {
 function str(value: unknown, ...keys: string[]) {
   const r = record(value)
   for (const key of keys) if (typeof r[key] === "string") return r[key] as string
-  return undefined
-}
-
-function num(value: unknown, ...keys: string[]) {
-  const r = record(value)
-  for (const key of keys) if (typeof r[key] === "number") return r[key] as number
   return undefined
 }
 
@@ -318,23 +314,16 @@ function mergeFile(a: DiffFile, b: DiffFile): DiffFile {
   }
 }
 
-const dim = (s: string) => `\x1b[2m${s}\x1b[22m`
-const bold = (s: string) => `\x1b[1m${s}\x1b[22m`
-
 /**
- * Builds the workspace from the thread: changed files from edit and write calls, the shell
- * session from command calls, and the latest todo list. Pure, so it can run on every render.
+ * Builds the workspace from the thread: changed files from edit and write calls, plus the latest
+ * todo list. Pure, so it can run on every render. Bash calls stay in the thread as tool rows;
+ * the app has no separate terminal view.
  */
 function codingWorkspaceFromMessages(messages: ChatcnMessage[]): CodingWorkspace {
   const files = new Map<string, DiffFile>()
   const pending = new Set<string>()
   const streaming = new Set<string>()
   let todos: TodoItem[] = []
-  let text = ""
-  let command: string | undefined
-  let cwd: string | undefined
-  let running = false
-  let exitCode: number | null | undefined
   let activity: CodingWorkspace["activity"]
 
   for (const message of messages) {
@@ -345,23 +334,6 @@ function codingWorkspaceFromMessages(messages: ChatcnMessage[]): CodingWorkspace
       if (TODO_TOOLS.has(key)) {
         const next = todosFrom(part.input)
         if (next.length) todos = next
-        continue
-      }
-      if (SHELL_TOOLS.has(key)) {
-        const cmd = str(part.input, "command", "cmd", "script")
-        if (!cmd || part.state === "input-streaming" || part.state === "output-denied") continue
-        const output = part.output
-        const out = typeof output === "string" ? output : (str(output, "stdout", "output") ?? "")
-        const err = str(output, "stderr") ?? (part.state === "output-error" ? part.errorText : "")
-        cwd = str(part.input, "cwd", "workdir") ?? cwd
-        command = cmd
-        running = !isTerminalToolState(part.state) || part.preliminary === true
-        exitCode = running ? undefined : (num(output, "exitCode", "exit_code", "code") ?? null)
-        if (part.state === "output-error" && exitCode === null) exitCode = 1
-        const body = `${out}${err ? (out.endsWith("\n") || !out ? "" : "\n") + err : ""}`
-        text += `${text ? "\n" : ""}${dim(cwd ?? "~")} ${bold(`$ ${cmd}`)}\n${body}`
-        if (!body.endsWith("\n") && body) text += "\n"
-        activity = { key: `${part.toolCallId}`, tab: "terminal" }
         continue
       }
       const change = fileChange(part)
@@ -378,7 +350,6 @@ function codingWorkspaceFromMessages(messages: ChatcnMessage[]): CodingWorkspace
     files: [...files.values()],
     pendingPaths: [...pending],
     streamingPaths: [...streaming],
-    terminal: { text, command, cwd, running, exitCode },
     todos,
     activity,
   }
@@ -387,6 +358,82 @@ function codingWorkspaceFromMessages(messages: ChatcnMessage[]): CodingWorkspace
 /* -------------------------------------------------------------------------------------------------
  * Thread pieces
  * -----------------------------------------------------------------------------------------------*/
+
+/** Tool names → what the student sees while the call runs. */
+const ACTIVITY_LABELS: Record<string, string> = {
+  bash: "Running a command",
+  shell: "Running a command",
+  run_command: "Running a command",
+  read: "Reading a file",
+  read_file: "Reading a file",
+  read_document: "Reading a document",
+  ocr_image: "Reading an image",
+  web_search: "Searching the web",
+  web_fetch: "Reading a page",
+  write: "Writing a file",
+  write_file: "Writing a file",
+  edit: "Editing a file",
+  edit_file: "Editing a file",
+  todo_write: "Planning the work",
+  share_file: "Preparing a file",
+  ask_student: "Waiting for your answer",
+}
+
+function activityLabel(part: ChatcnToolPart) {
+  const known = ACTIVITY_LABELS[toolKey(part)]
+  if (known) return known
+  const name = getToolName(part)
+  return name ? `Running ${name.replace(/[_-]+/g, " ")}` : "Working"
+}
+
+/** What the run is doing right now, from the tail of the thread. */
+function currentActivity(messages: ChatcnMessage[]): string | undefined {
+  const last = messages.at(-1)
+  if (!last || last.role !== "assistant") return undefined
+  for (let i = last.parts.length - 1; i >= 0; i -= 1) {
+    const part = last.parts[i]
+    if (!part) continue
+    // Reasoning has its own "Thinking" line; do not say it twice.
+    if (part.type === "reasoning") return undefined
+    if (part.type === "text") return undefined
+    if (isToolPart(part)) return isTerminalToolState(part.state) ? undefined : activityLabel(part)
+  }
+  return undefined
+}
+
+/**
+ * The run-level working state: shown for every model while a run is in flight, so the student
+ * always knows something is happening even when the model does not narrate. It carries the
+ * current step and the elapsed time.
+ */
+function WorkingRow({
+  messages,
+  startedAt,
+}: {
+  messages: ChatcnMessage[]
+  startedAt?: number
+}) {
+  const activity = currentActivity(messages)
+  const { ms } = useChatcnElapsed({ running: true, startedAt })
+  if (startedAt === undefined) return null
+  return (
+    <div
+      data-slot="working"
+      role="status"
+      aria-live="polite"
+      className="chatcn-text-14 text-chatcn-fg-subtle -ms-1 flex min-h-6 items-center gap-2 py-0.5"
+    >
+      <Spinner className="size-3.5 shrink-0" />
+      <ShimmerText>Working</ShimmerText>
+      {activity ? <span className="chatcn-text-13 truncate">{activity}</span> : null}
+      {ms !== undefined && ms >= 1000 ? (
+        <span aria-hidden="true" className="chatcn-text-12 shrink-0 tabular-nums">
+          {formatChatcnDuration(ms, { precise: false })}
+        </span>
+      ) : null}
+    </div>
+  )
+}
 
 /** A todo update in the thread: one quiet row, the list itself one click away. */
 function ToolTodoWritePart(props: ToolRendererProps) {
@@ -744,12 +791,16 @@ const AgentMessage = React.memo(function AgentMessage({
   stopped,
   latest,
   onFork,
+  onSpeak,
+  speaking,
 }: {
   message: ChatcnMessage
   streaming: boolean
   stopped: boolean
   latest: boolean
   onFork?: (message: ChatcnMessage) => void
+  onSpeak?: (message: ChatcnMessage) => void
+  speaking?: boolean
 }) {
   const groups = React.useMemo(() => readGroups(message), [message])
   const text = messageText(message)
@@ -758,6 +809,15 @@ const AgentMessage = React.memo(function AgentMessage({
       <GitForkIcon className="size-4" />
     </MessageAction>
   ) : null
+  const readAloud =
+    text && onSpeak ? (
+      <MessageAction
+        label={speaking ? "Stop reading" : "Read aloud"}
+        onClick={() => onSpeak(message)}
+      >
+        {speaking ? <VolumeXIcon className="size-4" /> : <Volume2Icon className="size-4" />}
+      </MessageAction>
+    ) : null
 
   if (message.role !== "assistant") {
     return (
@@ -787,6 +847,7 @@ const AgentMessage = React.memo(function AgentMessage({
             renderText={renderMarkdown}
             components={partComponents}
             toolVariant="inline"
+            showThinking={false}
           />
         </GroupContext.Provider>
       </MessageContent>
@@ -794,6 +855,7 @@ const AgentMessage = React.memo(function AgentMessage({
       {!streaming && !waiting && text ? (
         <MessageActions>
           <MessageActionCopy value={text} label="Copy response" />
+          {readAloud}
           {fork}
         </MessageActions>
       ) : null}
@@ -887,27 +949,6 @@ function ChangesView({
         </div>
       </div>
     </div>
-  )
-}
-
-function TerminalView({ terminal }: { terminal: CodingTerminalState }) {
-  if (!terminal.text) {
-    return (
-      <QuietEmpty title="No commands yet">
-        Tests, builds and scripts the agent runs stream here as they happen.
-      </QuietEmpty>
-    )
-  }
-  return (
-    <Terminal
-      text={terminal.text}
-      title="zsh"
-      cwd={terminal.cwd}
-      running={terminal.running}
-      exitCode={terminal.running ? undefined : terminal.exitCode}
-      maxHeight="none"
-      className="bg-chatcn-bg-subtle min-h-0 flex-1 rounded-none shadow-none [&>section]:flex-1"
-    />
   )
 }
 
@@ -1150,6 +1191,8 @@ function MentorAgent({
   onDownloadFile,
   onRefreshFiles,
   onAnswerQuestions,
+  onTranscribe,
+  voiceSignal,
   suggestions,
   onSuggestion,
   fullHeight = false,
@@ -1159,7 +1202,7 @@ function MentorAgent({
   const busy = status === "submitted" || status === "streaming"
   const derived = React.useMemo(() => codingWorkspaceFromMessages(messages), [messages])
   const workspace: CodingWorkspace = { ...derived, ...workspaceProp }
-  const { files, terminal, todos } = workspace
+  const { files, todos } = workspace
 
   const [, setTab] = useControllable(tabProp, defaultWorkspaceTab, onWorkspaceTabChange)
   const [view, setView] = React.useState<CodingWorkspaceTab | null>(null)
@@ -1167,6 +1210,19 @@ function MentorAgent({
   const [queue, setQueue] = useControllable(queueProp, defaultQueue, onQueueChange)
   const [input, setInput] = React.useState("")
   const [stopped, setStopped] = React.useState<ReadonlySet<string>>(() => new Set())
+  // Voice input: recording, then transcribing. `voiceError` shows in the listening bar.
+  const [voice, setVoice] = React.useState<"idle" | "recording" | "transcribing">("idle")
+  const [voiceError, setVoiceError] = React.useState<string | null>(null)
+  const recordingRef = React.useRef<Recording | null>(null)
+  const canVoice = Boolean(onTranscribe)
+  // Read aloud: the id of the message being spoken.
+  const [speaking, setSpeaking] = React.useState<string | null>(null)
+  // When the current run began, for the working row. Held while the run is in flight.
+  const [runStartedAt, setRunStartedAt] = React.useState<number | undefined>(undefined)
+  React.useEffect(() => {
+    if (busy) setRunStartedAt((at) => at ?? Date.now())
+    else setRunStartedAt(undefined)
+  }, [busy])
 
   // Remember what the agent touched last, so the sheet opens on the right view.
   // It never opens by itself: a sheet that appears while the student reads is noise.
@@ -1230,6 +1286,84 @@ function MentorAgent({
     actions.stop?.()
   }
 
+  const beginVoice = React.useCallback(async () => {
+    if (!onTranscribe) return
+    setVoiceError(null)
+    if (recordingRef.current) return
+    try {
+      const recording = startRecording()
+      recordingRef.current = recording
+      setVoice("recording")
+      await recording.started
+    } catch {
+      recordingRef.current = null
+      setVoice("idle")
+      setVoiceError("Microphone access is needed for voice input.")
+    }
+  }, [onTranscribe])
+
+  const finishVoice = React.useCallback(
+    async (keep: boolean) => {
+      const recording = recordingRef.current
+      if (!recording) return
+      recordingRef.current = null
+      try {
+        const clip = await recording.stop()
+        if (!keep) {
+          setVoice("idle")
+          return
+        }
+        setVoice("transcribing")
+        const text = await onTranscribe?.(clip)
+        if (text) setInput((prev) => (prev ? `${prev} ${text}` : text))
+        setVoice("idle")
+      } catch (cause) {
+        setVoice("idle")
+        setVoiceError(cause instanceof Error ? cause.message : "Could not transcribe that.")
+      }
+    },
+    [onTranscribe],
+  )
+
+  const toggleVoice = React.useCallback(() => {
+    if (voice === "recording") void finishVoice(true)
+    else if (voice === "idle") void beginVoice()
+  }, [voice, beginVoice, finishVoice])
+
+  // The sidebar voice button bumps `voiceSignal`; start listening when it changes.
+  const lastVoiceSignal = React.useRef(voiceSignal)
+  React.useEffect(() => {
+    if (voiceSignal === undefined || voiceSignal === lastVoiceSignal.current) return
+    lastVoiceSignal.current = voiceSignal
+    void beginVoice()
+  }, [voiceSignal, beginVoice])
+
+  React.useEffect(
+    () => () => {
+      recordingRef.current?.cancel()
+      stopSpeaking()
+    },
+    [],
+  )
+
+  const toggleSpeak = React.useCallback(
+    (message: ChatcnMessage) => {
+      if (speaking === message.id) {
+        stopSpeaking()
+        setSpeaking(null)
+        return
+      }
+      const text = messageText(message)
+      if (!text) return
+      const started = speak(text, {
+        onStart: () => setSpeaking(message.id),
+        onEnd: () => setSpeaking((current) => (current === message.id ? null : current)),
+      })
+      if (!started) setSpeaking(null)
+    },
+    [speaking],
+  )
+
   const openView = (next: CodingWorkspaceTab) => {
     setTab(next)
     setView(next)
@@ -1250,18 +1384,6 @@ function MentorAgent({
     }),
     [toolRenderers, actions.approve, actions.deny, onOpenFile, onDownloadFile, onAnswerQuestions],
   )
-
-  // Ctrl+` still opens the terminal, the way editors do.
-  React.useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.key === "`" && !event.isComposing) {
-        event.preventDefault()
-        openView("terminal")
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
 
   React.useEffect(() => {
     if (!view) return
@@ -1315,8 +1437,11 @@ function MentorAgent({
               stopped={stopped.has(message.id)}
               latest={i === messages.length - 1}
               onFork={onForkMessage}
+              onSpeak={speechSupported() ? toggleSpeak : undefined}
+              speaking={speaking === message.id}
             />
           ))}
+          {busy ? <WorkingRow messages={messages} startedAt={runStartedAt} /> : null}
         </ConversationContent>
         <ScrollToBottom />
       </Conversation>
@@ -1329,6 +1454,58 @@ function MentorAgent({
     >
       {todos.length ? <TodoList items={todos} collapsible defaultOpen={false} /> : null}
       {queue.length ? <QueuedMessages items={queue} onItemsChange={setQueue} /> : null}
+      {voice !== "idle" || voiceError ? (
+        <div
+          data-slot="voice-status"
+          role="status"
+          className="border-chatcn-border bg-chatcn-surface flex min-h-11 items-center gap-2.5 rounded-chatcn-lg border px-3 py-2"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              voice === "recording" ? "bg-chatcn-red animate-pulse" : "bg-chatcn-fg-subtle",
+            )}
+          />
+          <span
+            className={cn(
+              "chatcn-text-13 text-chatcn-fg min-w-0 flex-1",
+              voiceError ? "text-pretty" : "truncate",
+            )}
+          >
+            {voiceError ??
+              (voice === "recording" ? "Listening..." : "Transcribing...")}
+          </span>
+          {voice === "recording" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void finishVoice(false)}
+                className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-muted hover:bg-chatcn-fill-hover hover:text-chatcn-fg chatcn-text-12 flex h-8 shrink-0 items-center px-2"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void finishVoice(true)}
+                data-testid="voice-done"
+                className="chatcn-focus bg-chatcn-primary text-chatcn-primary-fg hover:bg-chatcn-primary-hover chatcn-text-12 flex h-8 shrink-0 items-center rounded-full px-3 font-medium"
+              >
+                Done
+              </button>
+            </>
+          ) : voiceError ? (
+            <button
+              type="button"
+              onClick={() => setVoiceError(null)}
+              aria-label="Dismiss"
+              className="chatcn-focus rounded-chatcn-sm text-chatcn-fg-subtle hover:text-chatcn-fg flex size-7 shrink-0 items-center justify-center"
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <PromptInput
         value={input}
         onValueChange={setInput}
@@ -1366,6 +1543,21 @@ function MentorAgent({
         <PromptInputToolbar>
           <PromptInputTools>
             <PromptInputAttachButton tooltip="Attach a document" />
+            {canVoice ? (
+              <PromptInputButton
+                tooltip={voice === "recording" ? "Stop recording" : "Voice input"}
+                onClick={toggleVoice}
+                data-testid="voice-composer"
+                aria-label={voice === "recording" ? "Stop recording" : "Voice input"}
+                className={cn(voice === "recording" && "text-chatcn-red")}
+              >
+                {voice === "recording" ? (
+                  <MicOffIcon className="size-4" />
+                ) : (
+                  <MicIcon className="size-4" />
+                )}
+              </PromptInputButton>
+            ) : null}
           </PromptInputTools>
           <PromptInputActions>
             <PromptInputSubmit />
@@ -1375,8 +1567,7 @@ function MentorAgent({
     </div>
   )
 
-  const viewLabel =
-    view === "files" ? "Files" : view === "changes" ? "Changes" : view === "terminal" ? "Terminal" : ""
+  const viewLabel = view === "files" ? "Files" : view === "changes" ? "Changes" : ""
 
   const panel = (which: CodingWorkspaceTab) => (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1387,10 +1578,8 @@ function MentorAgent({
           onDownload={onDownloadFile}
           onRefresh={onRefreshFiles}
         />
-      ) : which === "changes" ? (
-        <ChangesView workspace={workspace} selected={selected} onSelect={pickFile} />
       ) : (
-        <TerminalView terminal={terminal} />
+        <ChangesView workspace={workspace} selected={selected} onSelect={pickFile} />
       )}
     </div>
   )
@@ -1404,6 +1593,22 @@ function MentorAgent({
     <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between px-2 py-1.5">
       <div className="pointer-events-auto">{leadingAction}</div>
       <div className="pointer-events-auto flex items-center gap-1">
+        {canVoice ? (
+          <button
+            type="button"
+            onClick={toggleVoice}
+            aria-label={voice === "recording" ? "Stop recording" : "Voice input"}
+            title={voice === "recording" ? "Stop recording" : "Voice input"}
+            data-testid="voice-top"
+            className={cn(floatingButton, voice === "recording" && "text-chatcn-red")}
+          >
+            {voice === "recording" ? (
+              <MicOffIcon className="size-5" />
+            ) : (
+              <MicIcon className="size-5" />
+            )}
+          </button>
+        ) : null}
         {onNewChat ? (
           <button
             type="button"
@@ -1435,17 +1640,6 @@ function MentorAgent({
                   <DiffIcon />
                   Changes
                   <MenuShortcut>{files.length}</MenuShortcut>
-                </MenuItem>
-              ) : null}
-              {terminal.text || terminal.running ? (
-                <MenuItem onClick={() => openView("terminal")} data-testid="menu-terminal">
-                  <SquareTerminalIcon />
-                  Terminal
-                  {terminal.running ? (
-                    <MenuShortcut>
-                      <Spinner className="size-3" />
-                    </MenuShortcut>
-                  ) : null}
                 </MenuItem>
               ) : null}
             </MenuGroup>
@@ -1536,7 +1730,6 @@ function MentorAgent({
 export type {
   CodingAgentProps as MentorAgentProps,
   CodingAgentStatus as MentorAgentStatus,
-  CodingTerminalState,
   CodingWorkspace,
   CodingWorkspaceTab,
 }

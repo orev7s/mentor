@@ -207,3 +207,13 @@ export function providerIdsWithKey(): Set<string> {
   }
   return ids;
 }
+
+/** The API key for a provider: auth.json first, then an env var like GROQ_API_KEY. */
+export function apiKeyFor(providerId: string): string | undefined {
+  const stored = readAuth()[providerId]?.key;
+  if (stored) return stored;
+  const fromEnv = process.env[`${providerId.toUpperCase()}_API_KEY`];
+  if (fromEnv) return fromEnv;
+  const custom = readModelsFile().providers[providerId]?.apiKey;
+  return custom || undefined;
+}

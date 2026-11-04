@@ -66,6 +66,8 @@ interface MessagePartsProps extends Omit<React.ComponentProps<"div">, "children"
   toolVariant?: ToolCallProps["variant"]
   /** Label for the pending indicator. Defaults to "Thinking". */
   thinkingLabel?: string
+  /** Show the inline pending indicator in gaps. Turn it off when a run-level indicator is shown. */
+  showThinking?: boolean
 }
 
 /* -------------------------------------------------------------------------------------------------
@@ -282,6 +284,7 @@ function MessageParts({
   toolProps,
   toolVariant = "inline",
   thinkingLabel,
+  showThinking = true,
   className,
   ...props
 }: MessagePartsProps) {
@@ -384,7 +387,7 @@ function MessageParts({
           </PartBoundary>
         )
       })}
-      {everStreamed && !handoff ? (
+      {showThinking && everStreamed && !handoff ? (
         <ThinkingIndicator active={waiting} label={thinkingLabel} />
       ) : null}
     </div>

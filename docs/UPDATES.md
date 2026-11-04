@@ -21,8 +21,8 @@ On every launch, before React renders, `web/src/lib/updater.ts` runs:
 There is no dialog, no splash, and nothing for the student to tap. If the
 download fails or the phone is offline, it just tries again next launch.
 
-To see which bundle is live, open Settings. It shows `Running bundle 1.0.5
-(web)` after an update has applied, or `1.0.5 (bundled)` while the copy that
+To see which bundle is live, open Settings. It shows `Running bundle 1.0.6
+(web)` after an update has applied, or `1.0.6 (bundled)` while the copy that
 shipped inside the APK is still in use.
 
 The repo is `orev7s/mentor` by default. Override it at build time with
@@ -67,19 +67,20 @@ Rules that matter:
 - Attach a `.zip` whose name mentions `mentor-web`, `web` or `dist` so the app
   picks it over any other zip on the release.
 - The running native version is `versionName` in
-  `web/android/app/build.gradle` (currently `1.0.5`), so the first web release
-  after that APK should be `1.0.6` or higher.
+  `web/android/app/build.gradle` (currently `1.0.6`), so the first web release
+  after that APK should be `1.0.7` or higher.
 - Do not start a web version below the native version. `resetWhenUpdate` makes
   the native install win, and a lower web tag would be ignored.
 
 ## When a new APK is still required
 
 Only when native code changes: a new Capacitor plugin, a permission, the app
-icon, the download listener, or the updater itself. In that case bump
-`versionCode` and `versionName`, run `npx cap sync android` and
-`./gradlew assembleDebug`, copy the APK to `mentor.apk` at the repo root, then
-release once. `npm run release:web <version>` attaches both `mentor.apk` and the
-web bundle to the same release. After that, web changes go back to being silent.
+icon, the download listener, the updater itself, or the microphone permission
+voice input needs. In that case bump `versionCode` and `versionName`, run
+`npx cap sync android` and `./gradlew assembleDebug`, copy the APK to
+`mentor.apk` at the repo root, then release once. `npm run release:web
+<version>` attaches both `mentor.apk` and the web bundle to the same release.
+After that, web changes go back to being silent.
 
 ## Config
 

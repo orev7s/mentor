@@ -41,6 +41,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [saved, setSaved] = useState<SavedFile | null>(null);
+  const [voiceSignal, setVoiceSignal] = useState(0);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -167,7 +168,7 @@ export default function App() {
     >
       {!railCollapsed ? (
         <aside data-testid="session-rail" className="hidden w-[272px] shrink-0 lg:block">
-          <SessionRail mentor={mentor} />
+          <SessionRail mentor={mentor} onVoice={() => setVoiceSignal((n) => n + 1)} />
         </aside>
       ) : null}
 
@@ -184,7 +185,14 @@ export default function App() {
           bottom: "calc(var(--safe-bottom) + var(--keyboard-overlap, 0px))",
         }}
       >
-        <SessionRail mentor={mentor} onClose={() => setRailOpen(false)} />
+        <SessionRail
+          mentor={mentor}
+          onClose={() => setRailOpen(false)}
+          onVoice={() => {
+            setRailOpen(false);
+            setVoiceSignal((n) => n + 1);
+          }}
+        />
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -225,6 +233,8 @@ export default function App() {
             onRefreshFiles={() => void mentor.refreshFiles()}
             workspace={todos.length ? { todos } : undefined}
             onAnswerQuestions={mentor.answerQuestions}
+            onTranscribe={mentor.transcribe}
+            voiceSignal={voiceSignal}
             placeholder="Ask anything..."
             queuePlaceholder="Queue a message for when this run ends..."
             composerModel={mentor.activeModel?.name ?? mentor.model ?? "Model"}

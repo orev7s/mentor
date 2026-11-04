@@ -612,6 +612,14 @@ export function useMentor() {
         return;
       }
 
+      if (type === "model_switch") {
+        // The tutor hit a quota wall and moved to another free model. No error, just the new
+        // name in the menu and in the next session.
+        if (typeof event.to === "string") setModelState(event.to);
+        void refreshSessions();
+        return;
+      }
+
       if (type === "error") {
         setChatError(typeof event.message === "string" ? event.message : "Something went wrong");
         setStatus("error");
@@ -946,6 +954,14 @@ export function useMentor() {
     [],
   );
 
+  /** Transcribe a recorded clip on the server, which calls Groq Whisper. */
+  const transcribe = useCallback(async (audio: Blob, language?: string) => {
+    const api = clientRef.current;
+    if (!api) throw new Error("Not connected.");
+    const { text } = await api.transcribe(audio, language);
+    return text;
+  }, []);
+
   const attachFiles = useCallback(
     async (incoming: File[]) => {
       const api = clientRef.current;
@@ -1144,6 +1160,7 @@ export function useMentor() {
     send,
     stop,
     answerQuestions,
+    transcribe,
     forkMessage,
     attachFiles,
     removeAttachment,

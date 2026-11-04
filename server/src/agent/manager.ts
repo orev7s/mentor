@@ -13,6 +13,7 @@ import { ensureDirs, paths } from "../config.js";
 import { listWorkspaceFiles } from "../files.js";
 import { buildTools } from "../tools/index.js";
 import { QuestionBroker, type AskAnswer } from "../tools/ask.js";
+import { benchModel, isBenched, isQuotaError, pickFallback, unbenchModel } from "./failover.js";
 import { modelRef, resolveModelRef } from "./runtime.js";
 
 /**
@@ -154,18 +155,48 @@ export class TutorSession {
   private readonly questions: QuestionBroker;
   /** When the current prompt started, used to find the files it produced. */
   private runStartedAt: number | null = null;
+  /** Text of the turn in flight, so a quota failover can replay it on another model. */
+  private lastPromptText = "";
+  /** A quota error we swallowed, waiting to be retried on another model when the run settles. */
+  private quotaError: string | null = null;
+  /** One failover per turn. A second quota error just surfaces. */
+  private failoverTried = false;
 
   private constructor(meta: SessionMeta, session: AgentSession, questions: QuestionBroker) {
     this.meta = meta;
     this.session = session;
     this.questions = questions;
     this.unsubscribe = session.subscribe((event) => {
+      // A quota error ends the turn before any answer. Hold it back: the settle handler switches
+      // to another free model and replays the turn, so the student never sees a dead end.
+      if (event.type === "message_end") {
+        const message = (event as unknown as { message?: { role?: string; stopReason?: string; errorMessage?: string } }).message;
+        if (
+          !this.failoverTried &&
+          message?.role === "assistant" &&
+          message.stopReason === "error" &&
+          typeof message.errorMessage === "string" &&
+          isQuotaError(message.errorMessage)
+        ) {
+          this.quotaError = message.errorMessage;
+          return;
+        }
+      }
       // List the run's files before the client hears that the run settled, so the
       // artifacts card lands inside the assistant message it belongs to.
       if (event.type === "agent_settled") {
         void (async () => {
+          if (this.quotaError && (await this.failover())) {
+            this.publish(toWireEvent(event));
+            return;
+          }
           await this.emitArtifacts();
           this.publish(toWireEvent(event));
+          // No other model to move to: now the error is honest.
+          if (this.quotaError) {
+            this.publish({ type: "error", message: this.quotaError });
+            this.quotaError = null;
+          }
         })();
         return;
       }
@@ -244,9 +275,18 @@ export class TutorSession {
     return { meta: this.meta, messages: this.session.messages };
   }
 
-  prompt(text: string): Promise<unknown> {
+  async prompt(text: string): Promise<unknown> {
     if (this.busy) return this.session.followUp(text);
     this.busy = true;
+    this.lastPromptText = text;
+    this.failoverTried = false;
+    this.quotaError = null;
+    await this.preflightModel();
+    return this.run(text);
+  }
+
+  /** One turn: no busy flip, so a failover can replay it while the session stays busy. */
+  private run(text: string): Promise<unknown> {
     this.runStartedAt = Date.now();
     return this.session
       .prompt(text)
@@ -258,6 +298,79 @@ export class TutorSession {
         this.busy = false;
         this.meta.updatedAt = Date.now();
       });
+  }
+
+  /**
+   * Skip a model whose quota is known to be out, before the request fails. The student picked it
+   * earlier, so switching quietly is better than a guaranteed error.
+   */
+  private async preflightModel(): Promise<void> {
+    const from = this.meta.model;
+    if (!from || !isBenched(from)) return;
+    const next = await pickFallback(from);
+    if (!next) return;
+    const model = await resolveModelRef(next);
+    if (!model) return;
+    await this.session.setModel(model);
+    this.meta.model = modelRef(model);
+    this.meta.updatedAt = Date.now();
+    this.publish({ type: "model_switch", from, to: this.meta.model, reason: "quota" });
+  }
+
+  /**
+   * Move the session leaf back to just before the last student turn, so the replay adds one user
+   * message instead of a second copy of the same one. Returns false when the turn has no parent,
+   * for example the first message of a brand new chat.
+   */
+  private async rewindLastUserTurn(): Promise<boolean> {
+    try {
+      const file = this.meta.file;
+      if (!file || !existsSync(file)) return false;
+      const lines = readFileSync(file, "utf8").split("\n").filter(Boolean);
+      let parentId: string | null | undefined;
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        const entry = JSON.parse(lines[i] ?? "{}") as {
+          type?: string;
+          parentId?: string | null;
+          message?: { role?: string };
+        };
+        if (entry.type === "message" && entry.message?.role === "user") {
+          parentId = entry.parentId;
+          break;
+        }
+      }
+      if (!parentId) return false;
+      await this.session.navigateTree(parentId, { summarize: false });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The current model ran out of quota. Bench it, switch to the best configured free model and
+   * replay the turn. Returns false when there is nowhere to go.
+   */
+  private async failover(): Promise<boolean> {
+    const from = this.meta.model;
+    if (!from) return false;
+    const next = await pickFallback(from);
+    if (!next) return false;
+    const model = await resolveModelRef(next);
+    if (!model) return false;
+
+    this.failoverTried = true;
+    benchModel(from);
+    await this.session.setModel(model);
+    this.meta.model = modelRef(model);
+    this.meta.updatedAt = Date.now();
+    this.quotaError = null;
+    this.publish({ type: "model_switch", from, to: this.meta.model, reason: "quota" });
+    // Drop the failed half of the turn so the replay is one clean user message.
+    await this.rewindLastUserTurn();
+    // The SDK defers a prompt sent during settle, so this runs right after the failed run closes.
+    void this.run(this.lastPromptText);
+    return true;
   }
 
   /** Deliver the student's answers to a waiting ask_student call. */
@@ -276,6 +389,8 @@ export class TutorSession {
     await this.session.setModel(model);
     this.meta.model = modelRef(model);
     this.meta.updatedAt = Date.now();
+    // Picking a model is a deliberate fresh start, so lift any quota bench on it.
+    unbenchModel(ref);
   }
 
   setThinkingLevel(level: ThinkingLevel): void {

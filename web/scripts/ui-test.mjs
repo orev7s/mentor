@@ -63,6 +63,9 @@ try {
     timeout: 45000,
   });
   log("run started");
+  await page.waitForSelector('[data-slot="working"]', { timeout: 20000 }).catch(() => {});
+  await page.screenshot({ path: join(SHOTS, "16-working.png") });
+  log("working row captured");
   await page.waitForSelector('[data-slot="coding-agent"][data-chat-status="ready"]', {
     timeout: 240000,
   });
@@ -73,7 +76,6 @@ try {
   for (const [item, file] of [
     ["menu-files", "04-files.png"],
     ["menu-changes", "05-changes.png"],
-    ["menu-terminal", "06-terminal.png"],
   ]) {
     await openMenu();
     const entry = page.locator(`[data-testid="${item}"]`);
@@ -144,7 +146,9 @@ try {
   await page.waitForTimeout(300);
   log("workspace sheet opens and closes");
 
-  const chatsButton = page.getByRole("button", { name: "Chats" });
+  // The sidebar: open on desktop, with search, the two inert rows and the chat list.
+  await page.screenshot({ path: join(SHOTS, "11-sidebar.png") });
+  const chatsButton = page.getByRole("button", { name: "Chats", exact: true });
   await chatsButton.click();
   await page.waitForTimeout(400);
   const railGone = await page.getByTestId("session-rail").count();

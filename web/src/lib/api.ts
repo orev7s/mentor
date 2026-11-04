@@ -192,10 +192,35 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Send a recorded clip to the server for transcription. Audio goes up as multipart so the
+   * provider key stays on the server.
+   */
+  async transcribe(audio: Blob, language?: string): Promise<{ text: string }> {
+    const form = new FormData();
+    const ext = audio.type.includes("mp4") ? "m4a" : "webm";
+    form.append("file", audio, `voice.${ext}`);
+    if (language) form.append("language", language);
+    const res = await fetch(`${this.baseUrl}/transcribe`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${this.token}` },
+      body: form,
+    });
+    if (!res.ok) {
+      let message = res.statusText;
+      try {
+        message = ((await res.json()) as { error?: string }).error ?? message;
+      } catch {
+        // keep statusText
+      }
+      throw new ApiError(res.status, message);
+    }
+    return (await res.json()) as { text: string };
+  }
+
   files(id: string) {
     return this.request<{ files: WorkspaceFile[] }>("GET", `/sessions/${id}/files`);
   }
-
   eventsUrl(id: string): string {
     return `${this.baseUrl}/sessions/${id}/events?token=${encodeURIComponent(this.token)}`;
   }
