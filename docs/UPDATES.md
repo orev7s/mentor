@@ -21,8 +21,8 @@ On every launch, before React renders, `web/src/lib/updater.ts` runs:
 There is no dialog, no splash, and nothing for the student to tap. If the
 download fails or the phone is offline, it just tries again next launch.
 
-To see which bundle is live, open Settings. It shows `Running bundle 1.0.17
-(web)` after an update has applied, or `1.0.17 (bundled)` while the copy that
+To see which bundle is live, open Settings. It shows `Running bundle 1.0.18
+(web)` after an update has applied, or `1.0.18 (bundled)` while the copy that
 shipped inside the APK is still in use.
 
 The repo is `orev7s/mentor` by default. Override it at build time with
@@ -73,8 +73,8 @@ Rules that matter:
 - Attach a `.zip` whose name mentions `mentor-web`, `web` or `dist` so the app
   picks it over any other zip on the release.
 - The running native version is `versionName` in
-  `web/android/app/build.gradle` (currently `1.0.17`), so the next web release
-  after that APK should be `1.0.18` or higher.
+  `web/android/app/build.gradle` (currently `1.0.18`), so the next web release
+  after that APK should be `1.0.19` or higher.
 - Do not start a web version below the native version. `resetWhenUpdate` makes
   the native install win, and a lower web tag would be ignored.
 
