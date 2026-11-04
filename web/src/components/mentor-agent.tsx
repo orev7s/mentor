@@ -188,6 +188,13 @@ function MentorAgent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey])
   const [stopped, setStopped] = React.useState<ReadonlySet<string>>(() => new Set())
+  // Queued messages and stop markers belong to one chat. Do not flush chat A's
+  // queue into chat B or mark a new chat's message as stopped.
+  React.useEffect(() => {
+    setQueue([])
+    setStopped(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
   // Voice input: recording, then transcribing. `voiceError` shows in the listening bar.
   const [voice, setVoice] = React.useState<"idle" | "recording" | "transcribing">("idle")
   const [voiceError, setVoiceError] = React.useState<string | null>(null)
@@ -563,8 +570,9 @@ function MentorAgent({
     src: fileUrl?.(file.previewPath ?? file.path) ?? "",
     // A preview can fail on the phone (a format the WebView cannot decode); the
     // original is the last chance to show something instead of a blank stage.
-    fallbackSrc:
-      file.previewPath && fileUrl ? fileUrl(file.path) : undefined,
+    fallbackSrc: file.previewPath && fileUrl ? fileUrl(file.path) : undefined,
+    // Ask the server for an attachment disposition so the saved file keeps its name.
+    downloadSrc: fileUrl?.(file.path, true),
     alt: file.name,
     filename: file.name,
   }))

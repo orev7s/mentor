@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Mentor } from "@/hooks/use-mentor";
 import type { CustomProvider } from "@/lib/api";
+import { useBackHandler } from "@/lib/back";
 import { ChevronDownIcon, PlusIcon, XIcon } from "@/lib/chatcn-icons";
 import { runningBundleVersion } from "@/lib/updater";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,8 @@ const input =
   "focus:border-chatcn-border-strong";
 
 export function SettingsDialog({ mentor, onClose }: { mentor: Mentor; onClose: () => void }) {
+  // Android back closes settings instead of backgrounding the app.
+  useBackHandler(true, onClose);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
   const [showCustom, setShowCustom] = useState(false);

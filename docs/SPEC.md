@@ -200,8 +200,19 @@ card renders again and the broker still holds the wait.
   half-written prompt is saved per chat in `localStorage` and restored when the
   student comes back, even if the app was killed and cleared from the
   background.
+- Uploaded photos are sent as vision input when the active model accepts images
+  (`Model.input` includes `image`). The server reads the small JPEG preview it made
+  on upload, base64-encodes it, and passes it to `AgentSession.prompt(text, { images })`.
+  On a text-only model, or for any non-image file, the server appends a path note
+  and the agent reads the file with `read_document`/`ocr_image`. The note never
+  appears in the student's bubble: the client strips it when rendering a user turn.
+- The Android back button runs through `window.__mentorHandleBack()`. Open
+  overlays (lightbox, file preview, dialogs, the workspace sheet, the chat drawer)
+  register a handler and close on back; when nothing is open the WebView walks its
+  history and then the activity moves to the background instead of finishing.
 - Downloads on Android go through a `Downloader` plugin that hands the URL to
-  the system `DownloadManager`. The server sends `Content-Disposition` with the
+  the system `DownloadManager`, with a MIME type set from the file extension so
+  the chooser offers a PDF reader or editor for the saved file. The server sends `Content-Disposition` with the
   real name and extension, so a PDF lands as `report.pdf` in Downloads. The
   client polls the download and shows a notice at the top of the screen (below
   the floating buttons) with Open when it is ready. Open asks the manager for the

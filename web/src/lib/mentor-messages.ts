@@ -1,5 +1,11 @@
 import { stripAttachmentNote } from "@/lib/attachments";
-import type { ChatcnMessage, ChatcnTextPart, ChatcnToolPart } from "@/lib/chatcn-types";
+import {
+  isToolPart,
+  type ChatcnMessage,
+  type ChatcnPart,
+  type ChatcnTextPart,
+  type ChatcnToolPart,
+} from "@/lib/chatcn-types";
 
 /* -------------------------------------------------------------------------------------------------
  * Pi message -> chatcn part helpers
@@ -110,6 +116,32 @@ export function normalizeOutput(name: string, result: unknown, isError: boolean)
   }
 }
 
+/**
+ * Some providers stream a tool call's argument JSON as ordinary text and then
+ * report the same call natively. The JSON block is a duplicate, not prose: drop
+ * it when it parses to the call's input, so the thread shows one tool card.
+ */
+export function isToolJsonEcho(text: string, input: unknown): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  try {
+    return JSON.stringify(JSON.parse(trimmed)) === JSON.stringify(input);
+  } catch {
+    return false;
+  }
+}
+
+/** Remove text parts whose content is the raw JSON of a tool call beside them. */
+export function dropToolJsonEchoes(parts: ChatcnPart[]): ChatcnPart[] {
+  const tools = parts.filter(isToolPart);
+  if (!tools.length) return parts;
+  return parts.filter(
+    (part) =>
+      part.type !== "text" ||
+      !tools.some((tool) => isToolJsonEcho((part as ChatcnTextPart).text, tool.input)),
+  );
+}
+
 export function isTerminal(part: ChatcnToolPart): boolean {
   return part.state === "output-available" || part.state === "output-error";
 }
@@ -168,6 +200,10 @@ export function messagesFromSnapshot(raw: unknown[]): ChatcnMessage[] {
     }
   });
 
+  for (const message of out) {
+    if (message.role !== "assistant") continue;
+    message.parts = dropToolJsonEchoes(message.parts);
+  }
   return out;
 }
 

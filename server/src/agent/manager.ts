@@ -438,6 +438,15 @@ export class TutorSession {
     return this.session.model?.input?.includes("image") ?? false;
   }
 
+  /**
+   * Apply a pending quota failover before the caller asks what the model can do.
+   * The HTTP route needs this so a photo is not sent as vision to the text-only
+   * fallback model that will actually run the turn.
+   */
+  async prepareModel(): Promise<void> {
+    await this.preflightModel();
+  }
+
   async prompt(text: string, images: PromptImages = []): Promise<unknown> {
     if (this.busy || this.nudging) {
       return images.length ? this.session.followUp(text, images) : this.session.followUp(text);

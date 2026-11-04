@@ -13,9 +13,40 @@ import { Browser } from "@capacitor/browser";
 export type DownloadState = "pending" | "running" | "successful" | "failed";
 
 interface DownloaderPlugin {
-  download(options: { url: string; filename: string }): Promise<{ id: number; filename: string }>;
+  download(options: {
+    url: string;
+    filename: string;
+    mime?: string;
+  }): Promise<{ id: number; filename: string }>;
   status(options: { id: number }): Promise<{ status: DownloadState; filename?: string }>;
   open(options: { id: number }): Promise<void>;
+}
+
+/** A best-effort MIME from the file extension, so Android opens the saved file with the right app. */
+const MIME_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  txt: "text/plain",
+  md: "text/markdown",
+  csv: "text/csv",
+  json: "application/json",
+  zip: "application/zip",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
+function mimeForName(filename: string): string | undefined {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  return ext ? MIME_BY_EXT[ext] : undefined;
 }
 
 const Downloader = registerPlugin<DownloaderPlugin>("Downloader");
@@ -42,7 +73,7 @@ export async function openFile(url: string): Promise<void> {
 export async function downloadFile(url: string, filename: string): Promise<DownloadResult> {
   if (Capacitor.isNativePlatform()) {
     try {
-      const result = await Downloader.download({ url, filename });
+      const result = await Downloader.download({ url, filename, mime: mimeForName(filename) });
       return { id: result.id, filename: result.filename ?? filename };
     } catch {
       // The plugin is missing in an older APK. Fall back to the browser.

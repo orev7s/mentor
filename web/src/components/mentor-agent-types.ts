@@ -107,7 +107,7 @@ export interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "tit
   onAttachFiles?: (files: File[]) => void
   onRemoveAttachment?: (path: string) => void
   /** Builds the URL a workspace file is served from. Used for thumbnails and previews. */
-  fileUrl?: (path: string) => string
+  fileUrl?: (path: string, download?: boolean) => string
 
   /** Branch the conversation at a message, seeding a new chat with the turns before it. */
   onForkMessage?: (message: ChatcnMessage) => void

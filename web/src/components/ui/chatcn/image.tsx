@@ -31,6 +31,8 @@ interface ImageSource {
   caption?: React.ReactNode
   /** File name for downloads. Defaults to the last part of `src`. */
   filename?: string
+  /** URL to download from, when it differs from `src` (a preview vs the original). */
+  downloadSrc?: string
 }
 
 type ImageStatus = "loading" | "loaded" | "error"
@@ -116,7 +118,37 @@ function useImageStatus(src: string, onStatusChange?: (status: ImageStatus) => v
 /** The stage image, with one fallback to the original when a preview JPEG fails. */
 function LightboxImage({ image }: { image: ImageSource }) {
   const [src, setSrc] = React.useState(image.src)
-  React.useEffect(() => setSrc(image.src), [image.src])
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => {
+    setSrc(image.src)
+    setFailed(false)
+  }, [image.src])
+  if (failed) {
+    return (
+      <span className="flex flex-col items-center gap-3 text-center">
+        <span
+          role="img"
+          aria-label={`${image.alt}. The image could not load.`}
+          className="text-chatcn-fg-subtle flex flex-col items-center gap-2"
+        >
+          <ImageOffIcon aria-hidden="true" className="size-6" />
+          <span className="chatcn-text-13">Image unavailable</span>
+        </span>
+        <Button
+          variant="outline"
+          size="xs"
+          className="pointer-coarse:h-11"
+          onClick={() => {
+            setFailed(false)
+            setSrc(image.src)
+          }}
+        >
+          <RotateCcwIcon />
+          Retry
+        </Button>
+      </span>
+    )
+  }
   return (
     <img
       key={src}
@@ -126,7 +158,11 @@ function LightboxImage({ image }: { image: ImageSource }) {
       height={image.height}
       draggable={false}
       onError={() => {
-        if (image.fallbackSrc && src !== image.fallbackSrc) setSrc(image.fallbackSrc)
+        if (image.fallbackSrc && src !== image.fallbackSrc) {
+          setSrc(image.fallbackSrc)
+          return
+        }
+        setFailed(true)
       }}
       className="rounded-chatcn-md max-h-full max-w-full object-contain select-none"
     />
@@ -203,7 +239,7 @@ function ImageLightbox({
           {download ? (
             <Tooltip content="Download image">
               <a
-                href={current.src}
+                href={current.downloadSrc ?? current.src}
                 download={current.filename ?? filenameFrom(current.src)}
                 aria-label="Download image"
                 className={cn(

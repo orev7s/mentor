@@ -36,8 +36,9 @@ calls stay in the thread.
   the text lands in the composer. Turkish, Arabic and English. Every agent reply
   has a small Read aloud icon button next to Copy and Fork that uses the Android
   system text-to-speech engine
-- attachments in the composer (PDF, DOCX, images, text) that the agent reads with
-  `read_document`/`ocr_image`
+- attachments in the composer (PDF, DOCX, images, text). A photo goes to a
+  vision-capable model as an image, so the agent sees it directly; documents and
+  photos on text-only models are read with `read_document`/`ocr_image`
 - at the end of every run, a card listing the files that run created or changed,
   each with its own download button
 - `share_file` cards, where the agent points at one deliverable and offers it

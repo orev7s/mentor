@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * Android back button bridge.
@@ -22,15 +22,21 @@ export function pushBackHandler(handler: BackHandler): () => void {
   };
 }
 
-/** Register a handler while `active` is true. The handler should close the overlay. */
+/**
+ * Register a handler while `active` is true. The callback lives in a ref so a
+ * re-render of an ancestor does not re-register (and re-order) the handler:
+ * mount order decides which overlay is on top, not render order.
+ */
 export function useBackHandler(active: boolean, onBack: () => void): void {
+  const latest = useRef(onBack);
+  latest.current = onBack;
   useEffect(() => {
     if (!active) return;
     return pushBackHandler(() => {
-      onBack();
+      latest.current();
       return true;
     });
-  }, [active, onBack]);
+  }, [active]);
 }
 
 /** Called from MainActivity through `evaluateJavascript`. True when the UI closed something. */

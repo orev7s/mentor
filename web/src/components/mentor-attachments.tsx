@@ -21,7 +21,7 @@ import {
 import { type Attachment, formatBytes } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-const IMAGE_FILE = /\.(png|jpe?g|webp|gif|svg|avif|bmp|heic|ico)$/i
+const IMAGE_FILE = /\.(png|jpe?g|webp|gif|svg|avif|bmp|heic|heif|tiff?|ico)$/i
 /** Everything the paperclip accepts, matching what the server can store and the agent can read. */
 export const ATTACH_ACCEPT =
   ".pdf,.doc,.docx,.odt,.txt,.md,.markdown,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.xml,.ipynb,.tex,.py,.js,.jsx,.ts,.tsx,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.go,.rs,.rb,.php,.sh,.bash,.sql,.css,.scss,.vue,.svelte,.mmd,.mermaid,.png,.jpg,.jpeg,.webp,.gif,.svg,.avif,.heic"

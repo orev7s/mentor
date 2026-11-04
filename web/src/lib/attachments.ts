@@ -4,9 +4,13 @@
  * student: strip it before rendering a user turn, otherwise a photo prompt shows a
  * second "Attached files" bubble.
  */
-const NOTE_MARKER = "\n\nAttached files (";
+/**
+ * The note is always appended at the end, as a heading followed by `- path`
+ * lines. Requiring that shape keeps a student who types the phrase themselves
+ * from losing the rest of their message.
+ */
+const NOTE = /\n\nAttached files \([^)]*\):\n(?:- [^\n]*\n?)+\s*$/;
 
 export function stripAttachmentNote(text: string): string {
-  const index = text.indexOf(NOTE_MARKER);
-  return index < 0 ? text : text.slice(0, index).trimEnd();
+  return text.replace(NOTE, "").trimEnd();
 }

@@ -1,9 +1,15 @@
 import { useCallback } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { stripAttachmentNote } from "@/lib/attachments";
-import type { ChatcnMessage, ChatcnPart, ChatcnTextPart, ChatcnToolPart } from "@/lib/chatcn-types";
+import {
+  isToolPart,
+  type ChatcnMessage,
+  type ChatcnPart,
+  type ChatcnToolPart,
+} from "@/lib/chatcn-types";
 import type { ApiClient, SessionMeta, WorkspaceFile } from "@/lib/api";
 import {
+  dropToolJsonEchoes,
   isTerminal,
   messagesFromSnapshot,
   normalizeOutput,
@@ -111,10 +117,17 @@ export function useMentorStream(deps: StreamDeps) {
       const key = typeof contentIndex === "number" ? contentIndex : parts.length;
       const found = run.blocks.get(key);
       const existing = found === undefined ? undefined : parts[found];
+      // Providers such as openai-completions keep one text block across a tool
+      // call, so text after the call shares its content index. A tool part after
+      // the block means this is new text, not a continuation.
+      const toolAfter =
+        found !== undefined &&
+        parts.some((part, i) => i > (found as number) && isToolPart(part));
       if (
         existing &&
         existing.type === kind &&
-        (existing as { state?: string }).state === "streaming"
+        (existing as { state?: string }).state === "streaming" &&
+        !toolAfter
       ) {
         return { index: found as number, parts };
       }
@@ -269,15 +282,18 @@ export function useMentorStream(deps: StreamDeps) {
         const message = event.message as PiMessage | undefined;
         if (message?.role === "user") {
           const text = stripAttachmentNote(textFromContent(message.content));
-          // The optimistic bubble is already in the thread. Do not add the same
-          // turn twice just because the server echoed it back.
-          const lastUser = [...messagesRef.current].reverse().find((item) => item.role === "user");
-          const previous = lastUser?.parts
-            .filter((part): part is ChatcnTextPart => part.type === "text")
-            .map((part) => part.text)
-            .join("\n\n")
-            .trim();
-          if (previous === text.trim()) return;
+          // The optimistic bubble is already in the thread. Make the server's
+          // copy authoritative instead of appending a second turn. This also
+          // covers an attachment-only send, where the bubble text and the prompt
+          // the server stored are not the same string.
+          const last = messagesRef.current[messagesRef.current.length - 1];
+          if (last?.role === "user") {
+            replaceMessage(last.id, {
+              ...last,
+              parts: [{ type: "text", text }],
+            });
+            return;
+          }
           publish([
             ...messagesRef.current,
             {
@@ -330,6 +346,17 @@ export function useMentorStream(deps: StreamDeps) {
         });
         const run = runRef.current;
         if (run) run.blocks = new Map();
+        // The authoritative blocks are in. Remove any argument JSON that a provider
+        // also streamed as text, so a finished tool call is a card and only a card.
+        const assistant = messagesRef.current.find(
+          (item) => item.id === runRef.current?.assistantId,
+        );
+        if (assistant) {
+          const cleaned = dropToolJsonEchoes(assistant.parts);
+          if (cleaned.length !== assistant.parts.length) {
+            replaceMessage(assistant.id, { ...assistant, parts: cleaned });
+          }
+        }
         if (message.stopReason === "error" && message.errorMessage) {
           setChatError(message.errorMessage);
           setStatus("error");
@@ -458,11 +485,24 @@ export function useMentorStream(deps: StreamDeps) {
             meta?: SessionMeta;
             busy?: boolean;
           };
-          publish(messagesFromSnapshot(data.messages ?? []));
+          const restored = messagesFromSnapshot(data.messages ?? []);
+          publish(restored);
           // The run keeps going on the server while the app is backgrounded. Reconcile the
           // working state with the snapshot so returning shows the run, not a dead chat.
-          if (data.busy === true) setStatus("streaming");
-          else if (data.busy === false) {
+          if (data.busy === true) {
+            // The old assistant id is gone (snapshot ids differ). Adopt the restored
+            // message so the next delta lands in it instead of opening a duplicate.
+            const tail = restored[restored.length - 1];
+            if (tail?.role === "assistant") {
+              const tools = new Map<string, number>();
+              tail.parts.forEach((part, index) => {
+                const id = (part as { toolCallId?: string }).toolCallId;
+                if (id) tools.set(id, index);
+              });
+              runRef.current = { assistantId: tail.id, blocks: new Map(), tools };
+            }
+            setStatus("streaming");
+          } else if (data.busy === false) {
             setStatus((current) =>
               current === "streaming" || current === "submitted" ? "ready" : current,
             );
@@ -495,6 +535,11 @@ export function useMentorStream(deps: StreamDeps) {
         } catch {
           // a malformed frame must not kill the stream
         }
+      };
+      source.onerror = () => {
+        // The browser reconnects on its own. Clear the cold-start spinner so a
+        // refused connection does not leave the chat blank forever.
+        setLoadingSession(false);
       };
     },
     [

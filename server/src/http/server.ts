@@ -331,6 +331,9 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
         return;
       }
       const session = await manager.get(String(req.params.id));
+      // Settle any quota failover first, so vision is only used when the model
+      // that will actually run the turn accepts images.
+      await session.prepareModel();
 
       // Photos go to the model as vision input; everything else stays a path the
       // agent reads with a tool. The note is a wire detail, not a second user turn.
@@ -525,7 +528,16 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
       const session = await manager.get(sessionId);
       const dir = join(session.meta.cwd, "uploads");
       mkdirSync(dir, { recursive: true });
-      const safeName = basename(req.file.originalname).replace(/[^\w.\- ]/g, "_");
+      let safeName = basename(req.file.originalname).replace(/[^\w.\- ]/g, "_") || "upload";
+      // Two photos named IMG_0001 must not overwrite each other; the second gets
+      // a numeric suffix so each pending attachment keeps pointing at its own file.
+      if (existsSync(join(dir, safeName))) {
+        const ext = extname(safeName);
+        const stem = safeName.slice(0, safeName.length - ext.length) || "upload";
+        let n = 1;
+        while (existsSync(join(dir, `${stem}-${n}${ext}`))) n += 1;
+        safeName = `${stem}-${n}${ext}`;
+      }
       const target = join(dir, safeName);
       writeFileSync(target, req.file.buffer);
       const previews = await makeImagePreviews(target, dir, safeName);
