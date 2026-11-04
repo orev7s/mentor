@@ -3,6 +3,7 @@ import { ApiClient } from "./api";
 import type { ChatMessage, ContentBlock, CustomProvider, ModelSummary, ProviderPreset, SessionMeta } from "./types";
 
 const LS_KEY = "mentor.connection";
+const PREFS_KEY = "mentor.prefs";
 
 interface State {
   url: string;
@@ -72,10 +73,32 @@ export function modelRef(model: { provider: string; id: string }): string {
 export function loadSavedConnection(): void {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw) as { url?: string; token?: string };
-    state.url = saved.url ?? "";
-    state.token = saved.token ?? "";
+    if (raw) {
+      const saved = JSON.parse(raw) as { url?: string; token?: string };
+      state.url = saved.url ?? "";
+      state.token = saved.token ?? "";
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (raw) {
+      const prefs = JSON.parse(raw) as { model?: string; thinkingLevel?: string };
+      if (prefs.model) state.selectedModel = prefs.model;
+      if (prefs.thinkingLevel) state.thinkingLevel = prefs.thinkingLevel;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function savePrefs(): void {
+  try {
+    localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({ model: state.selectedModel, thinkingLevel: state.thinkingLevel }),
+    );
   } catch {
     // ignore
   }
@@ -103,6 +126,7 @@ export async function connect(url: string, token: string): Promise<void> {
     await candidate.health();
     const models = await candidate.models();
     const providers = await candidate.providers();
+    const settings = await candidate.settings();
     client = candidate;
     state.url = base;
     state.token = token.trim();
@@ -111,7 +135,14 @@ export async function connect(url: string, token: string): Promise<void> {
     state.presets = providers.presets;
     state.customProviders = providers.custom;
     state.configuredProviders = providers.configured;
-    if (!state.selectedModel) state.selectedModel = pickDefaultModel();
+    if (!state.selectedModel || !state.models.some((m) => modelRef(m) === state.selectedModel)) {
+      const preferred = settings.defaultModel;
+      state.selectedModel =
+        preferred && state.models.some((m) => modelRef(m) === preferred)
+          ? preferred
+          : pickDefaultModel();
+    }
+    savePrefs();
     localStorage.setItem(LS_KEY, JSON.stringify({ url: state.url, token: state.token }));
     await refreshSessions();
     if (state.sessions.length) await openSession(state.sessions[0].id);
@@ -152,11 +183,13 @@ export async function refreshSessions(): Promise<void> {
 
 export function setSelectedModel(ref: string): void {
   state.selectedModel = ref;
+  savePrefs();
 }
 
 export function setThinkingLevel(level: string): void {
   state.thinkingLevel = level;
   state.effortOpen = false;
+  savePrefs();
 }
 
 export function removeAttachment(path: string): void {

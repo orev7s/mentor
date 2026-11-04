@@ -39,6 +39,15 @@ export class ApiClient {
   models() {
     return this.request<{ models: ModelSummary[] }>("GET", "/models");
   }
+  settings() {
+    return this.request<{ defaultModel: string | null; defaultThinkingLevel: string }>(
+      "GET",
+      "/settings",
+    );
+  }
+  saveSettings(body: { defaultModel?: string | null; defaultThinkingLevel?: string }) {
+    return this.request<{ ok: boolean }>("POST", "/settings", body);
+  }
   providers() {
     return this.request<{ presets: ProviderPreset[]; custom: CustomProvider[]; configured: string[] }>(
       "GET",

@@ -1,10 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import multer from "multer";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ServerConfig } from "../config.js";
+import { saveConfig } from "../config.js";
 import { bearerAuth } from "../auth.js";
 import { AgentManager } from "../agent/manager.js";
 import { listModels, resetRuntime } from "../agent/runtime.js";
@@ -37,7 +38,7 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
   app.use(cors());
   app.use(express.json({ limit: "4mb" }));
 
-  app.get("/", (_req, res) => {
+  app.get("/api", (_req, res) => {
     res.json({ name: "mentor-server", version: 1, status: "ok" });
   });
 
@@ -45,10 +46,50 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
     res.json({ ok: true });
   });
 
+  // --- static web UI and app download (public) ---
+
+  const webDir = process.env.MENTOR_WEB_DIR ?? resolve(process.cwd(), "../web/dist");
+  if (existsSync(webDir)) {
+    app.use(express.static(webDir, { index: false }));
+    app.get("/", (_req, res) => {
+      res.sendFile(join(webDir, "index.html"));
+    });
+  }
+
+  const apkPath = process.env.MENTOR_APK ?? resolve(process.cwd(), "../mentor.apk");
+  if (existsSync(apkPath)) {
+    app.get("/mentor.apk", (_req, res) => {
+      res.download(apkPath, "mentor.apk");
+    });
+  }
+
   // Everything below requires the bearer token.
   app.use(bearerAuth(config.token));
 
   // --- models and providers ---
+
+  app.get("/settings", (_req, res) => {
+    res.json({
+      defaultModel: config.defaultModel ?? null,
+      defaultThinkingLevel: config.defaultThinkingLevel ?? "medium",
+    });
+  });
+
+  app.post("/settings", (req, res) => {
+    const body = req.body ?? {};
+    if (typeof body.defaultModel === "string" || body.defaultModel === null) {
+      config.defaultModel = body.defaultModel ?? undefined;
+    }
+    if (typeof body.defaultThinkingLevel === "string") {
+      config.defaultThinkingLevel = body.defaultThinkingLevel;
+    }
+    saveConfig(config);
+    res.json({
+      ok: true,
+      defaultModel: config.defaultModel ?? null,
+      defaultThinkingLevel: config.defaultThinkingLevel ?? "medium",
+    });
+  });
 
   app.get(
     "/models",
