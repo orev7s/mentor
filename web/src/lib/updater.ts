@@ -10,8 +10,8 @@ import { CapacitorUpdater } from "@capgo/capacitor-updater";
  * the student has to tap.
  *
  * Publish flow (see docs/UPDATES.md):
- *   1. npm run pack:update 1.0.1
- *   2. gh release create web-v1.0.1 mentor-web-1.0.1.zip
+ *   1. npm run release:web 1.0.1
+ *   2. it tags web-v1.0.1 and attaches the web zip, plus mentor.apk if present
  *
  * The tag carries the version. The asset is the built `dist` folder zipped with
  * `index.html` at the root.

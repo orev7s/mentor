@@ -101,9 +101,10 @@ npx cap sync android
 cd android && ./gradlew assembleDebug
 ```
 
-The APK lands at `web/android/app/build/outputs/apk/debug/app-debug.apk`.
+The APK lands at `web/android/app/build/outputs/apk/debug/app-debug.apk`. Copy
+it to `mentor.apk` at the repo root so the release script picks it up.
 
-## Ship a web update
+## Ship a release
 
 Web changes do not need a new APK. Build a bundle and publish it as a GitHub
 release; installed apps download it silently and apply it on the next launch:
@@ -113,9 +114,14 @@ cd web
 npm run release:web 1.0.1
 ```
 
+When `mentor.apk` exists at the repo root, the same command attaches it to the
+release too and the release is titled `Mentor 1.0.1`. That is what a native
+change looks like: one tag with both `mentor.apk` and `mentor-web-1.0.1.zip`.
+The script stops if the APK's `versionName` differs from the release version.
+
 The updater lives in `web/src/lib/updater.ts`, defaults to `orev7s/mentor`, and
-reads `VITE_UPDATE_REPO` if you want another repo. A new APK is only needed when
-native code changes. `docs/UPDATES.md` has the details.
+reads `VITE_UPDATE_REPO` if you want another repo. `docs/UPDATES.md` has the
+details.
 
 ## Test the UI
 

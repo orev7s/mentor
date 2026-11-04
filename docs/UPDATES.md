@@ -50,8 +50,15 @@ gh release create web-v1.0.1 releases/mentor-web-1.0.1.zip \
   --title "Web 1.0.1" --notes "Silent web update 1.0.1."
 ```
 
-Pass `--local` to only build and zip, then upload the file yourself. Pass
-`--skip-build` when `dist` is already current.
+If `mentor.apk` exists at the repo root, the script attaches it to the same
+release and titles it `Mentor 1.0.1` instead, because a native change ships both
+in one place. That is the usual release: one tag, two assets, `mentor.apk` plus
+`mentor-web-<version>.zip`. The script refuses to publish when the APK's
+`versionName` does not match the release version, so the two never drift.
+
+Pass `--local` to only build and zip, then upload the files yourself. Pass
+`--skip-build` when `dist` is already current. Note that npm needs a `--` to
+forward those flags: `npm run release:web 1.0.1 -- --skip-build`.
 
 Rules that matter:
 
@@ -69,8 +76,10 @@ Rules that matter:
 
 Only when native code changes: a new Capacitor plugin, a permission, the app
 icon, the download listener, or the updater itself. In that case bump
-`versionCode` and `versionName`, rebuild the APK, and hand it out. After that,
-web changes go back to being silent.
+`versionCode` and `versionName`, run `npx cap sync android` and
+`./gradlew assembleDebug`, copy the APK to `mentor.apk` at the repo root, then
+release once. `npm run release:web <version>` attaches both `mentor.apk` and the
+web bundle to the same release. After that, web changes go back to being silent.
 
 ## Config
 
