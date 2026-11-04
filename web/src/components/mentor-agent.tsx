@@ -26,17 +26,7 @@ import {
 import { Message, MessageContent, MessageStatus } from "@/components/ui/chatcn/message"
 import { MessageAction, MessageActionCopy, MessageActions } from "@/components/ui/chatcn/message-actions"
 import { type MessagePartComponents, MessageParts } from "@/components/ui/chatcn/message-parts"
-import {
-  PromptInput,
-  PromptInputActions,
-  PromptInputAttachments,
-  PromptInputButton,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputToolbar,
-  PromptInputTools,
-  usePromptInput,
-} from "@/components/ui/chatcn/prompt-input"
+import { PromptInputBox } from "@/components/ui/ai-prompt-box"
 import { type QueuedMessage, QueuedMessages } from "@/components/ui/chatcn/queued-messages"
 import { Reasoning, reasoningPropsFromPart } from "@/components/ui/chatcn/reasoning"
 import { ScrollToBottom } from "@/components/ui/chatcn/scroll-to-bottom"
@@ -192,6 +182,14 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   placeholder?: string
   /** Composer placeholder while the agent works. */
   queuePlaceholder?: string
+  /** Thinking is on by default. Off sends thinkingLevel "off" to the server. */
+  thinkingEnabled?: boolean
+  /** False when the model has no non-thinking mode, which hides the Think control. */
+  canThink?: boolean
+  onThinkingChange?: (enabled: boolean) => void
+  /** Search is on by default. Off removes web_search and web_fetch from the session. */
+  searchEnabled?: boolean
+  onSearchChange?: (enabled: boolean) => void
   emptyTitle?: React.ReactNode
   emptyDescription?: React.ReactNode
 
@@ -1284,6 +1282,9 @@ function ToolShareFilePart(props: ToolRendererProps) {
  * -----------------------------------------------------------------------------------------------*/
 
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif|svg|avif|bmp|heic|ico)$/i
+/** Everything the paperclip accepts, matching what the server can store and the agent can read. */
+const ATTACH_ACCEPT =
+  ".pdf,.doc,.docx,.odt,.txt,.md,.markdown,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.xml,.ipynb,.tex,.py,.js,.jsx,.ts,.tsx,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.go,.rs,.rb,.php,.sh,.bash,.sql,.css,.scss,.vue,.svelte,.mmd,.mermaid,.png,.jpg,.jpeg,.webp,.gif,.svg,.avif,.heic"
 const CODE_FILE = new Set([
   "js",
   "jsx",
@@ -1343,35 +1344,82 @@ function AttachmentFileIcon({ name }: { name: string }) {
 }
 
 /** The paperclip, now a small menu so an image never has to go through the document picker. */
-function AttachmentMenuButton({ className }: { className?: string }) {
-  const { openFilePicker, openImagePicker, acceptsFiles, disabled } = usePromptInput()
-  if (!acceptsFiles) return null
+function AttachmentMenuButton({
+  className,
+  onFiles,
+  disabled,
+  accept,
+}: {
+  className?: string
+  onFiles?: (files: File[]) => void
+  disabled?: boolean
+  accept?: string
+}) {
+  const imageInput = React.useRef<HTMLInputElement>(null)
+  const fileInput = React.useRef<HTMLInputElement>(null)
+  if (!onFiles) return null
+  const send = (files: FileList | null) => {
+    if (files?.length) onFiles(Array.from(files))
+  }
   return (
-    <Menu>
-      <MenuTrigger
-        aria-label="Add attachment"
-        title="Add attachment"
-        disabled={disabled}
-        data-slot="prompt-input-attach"
-        data-testid="attach-menu"
-        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), className)}
-      >
-        <PaperclipIcon />
-      </MenuTrigger>
-      <MenuContent side="top" align="start" sideOffset={8} className="min-w-52">
-        <MenuGroup>
-          <MenuLabel>Add attachment</MenuLabel>
-          <MenuItem onClick={openImagePicker} data-testid="attach-image">
-            <ImagePlusIcon />
-            Add image
-          </MenuItem>
-          <MenuItem onClick={openFilePicker} data-testid="attach-file">
-            <FileTextIcon />
-            Add file
-          </MenuItem>
-        </MenuGroup>
-      </MenuContent>
-    </Menu>
+    <>
+      <Menu>
+        <MenuTrigger
+          aria-label="Add attachment"
+          title="Add attachment"
+          disabled={disabled}
+          data-slot="prompt-input-attach"
+          data-testid="attach-menu"
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "sm" }),
+            "h-8 gap-1 rounded-full px-2 text-xs text-[#9CA3AF] hover:bg-transparent hover:text-[#D1D5DB] [&_svg]:size-4",
+            className,
+          )}
+        >
+          <PaperclipIcon />
+          <span>Attach</span>
+        </MenuTrigger>
+        <MenuContent side="top" align="start" sideOffset={8} className="min-w-52">
+          <MenuGroup>
+            <MenuLabel>Add attachment</MenuLabel>
+            <MenuItem onClick={() => imageInput.current?.click()} data-testid="attach-image">
+              <ImagePlusIcon />
+              Add image
+            </MenuItem>
+            <MenuItem onClick={() => fileInput.current?.click()} data-testid="attach-file">
+              <FileTextIcon />
+              Add file
+            </MenuItem>
+          </MenuGroup>
+        </MenuContent>
+      </Menu>
+      <input
+        ref={imageInput}
+        type="file"
+        multiple
+        accept="image/*"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="hidden"
+        onChange={(event) => {
+          send(event.target.files)
+          event.target.value = ""
+        }}
+      />
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        accept={accept}
+        tabIndex={-1}
+        aria-hidden="true"
+        className="hidden"
+        onChange={(event) => {
+          send(event.target.files)
+          event.target.value = ""
+        }}
+      />
+    </>
   )
 }
 
@@ -1408,9 +1456,9 @@ function ImageAttachmentCard({
   onRemove: (path: string) => void
   onPreview: (file: Attachment) => void
 }) {
-  const [failed, setFailed] = React.useState(false)
-  React.useEffect(() => setFailed(false), [src])
-  const showImage = Boolean(src) && !failed
+  const [status, setStatus] = React.useState<"loading" | "loaded" | "error">("loading")
+  React.useEffect(() => setStatus("loading"), [src])
+  const showImage = Boolean(src) && status !== "error"
   return (
     <div data-slot="attachment" data-kind="image" className="relative w-24 min-w-0">
       <button
@@ -1419,16 +1467,28 @@ function ImageAttachmentCard({
         title={file.name}
         className="chatcn-focus border-chatcn-border bg-chatcn-fill hover:bg-chatcn-fill-hover block w-full overflow-hidden rounded-chatcn-lg border text-start transition-colors"
       >
-        <span className="bg-chatcn-fill-hover block aspect-square w-full overflow-hidden">
+        <span className="bg-chatcn-fill-hover relative block aspect-square w-full overflow-hidden">
           {showImage ? (
-            <img
-              src={src}
-              alt=""
-              loading="lazy"
-              decoding="async"
-              onError={() => setFailed(true)}
-              className="size-full object-cover"
-            />
+            <>
+              {status === "loading" ? (
+                <span
+                  aria-hidden="true"
+                  className="bg-chatcn-fill absolute inset-0 animate-pulse"
+                />
+              ) : null}
+              <img
+                src={src}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                onLoad={() => setStatus("loaded")}
+                onError={() => setStatus("error")}
+                className={cn(
+                  "relative size-full object-cover transition-opacity duration-200",
+                  status === "loaded" ? "opacity-100" : "opacity-0",
+                )}
+              />
+            </>
           ) : (
             <span className="text-chatcn-fg-subtle grid size-full place-items-center">
               <FileImageIcon className="size-6" />
@@ -1530,7 +1590,7 @@ function AttachmentCards({
             <ImageAttachmentCard
               key={file.path}
               file={file}
-              src={fileUrl?.(file.path)}
+              src={fileUrl?.(file.thumbPath ?? file.path)}
               onRemove={onRemove}
               onPreview={onPreviewImage}
             />
@@ -1589,6 +1649,11 @@ function MentorAgent({
   onQueueChange,
   placeholder = "Ask anything…",
   queuePlaceholder = "Queue a message for when this run ends…",
+  thinkingEnabled = true,
+  canThink = false,
+  onThinkingChange,
+  searchEnabled = true,
+  onSearchChange,
   emptyTitle = "What should we work on?",
   emptyDescription,
   attachments = [],
@@ -1925,12 +1990,6 @@ function MentorAgent({
       </Conversation>
     )
 
-  // A chip inside the composer tools card: 32 px visual to sit level with Send, with a
-  // pseudo element that grows the touch target to 44 px without moving the card.
-  const toolButton =
-    "relative size-8 rounded-chatcn-sm pointer-coarse:size-8 " +
-    "after:absolute after:-inset-1.5 after:content-[''] pointer-fine:after:hidden"
-
   const composer = (
     <div
       data-slot="coding-agent-composer"
@@ -1990,21 +2049,34 @@ function MentorAgent({
           ) : null}
         </div>
       ) : null}
-      <PromptInput
+      <PromptInputBox
         value={input}
         onValueChange={setDraft}
-        onSubmit={({ text }) => submit(text)}
-        // While the agent works, an empty field offers Stop; typing turns it into Queue.
-        status={busy && !input.trim() ? "streaming" : uploading ? "submitting" : "idle"}
+        onSend={(text) => submit(text)}
         onStop={stop}
+        isLoading={busy}
         disabled={!actions.send}
-        onFiles={(incoming) => onAttachFiles?.(incoming)}
-        accept=".pdf,.doc,.docx,.odt,.txt,.md,.markdown,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.xml,.ipynb,.tex,.py,.js,.jsx,.ts,.tsx,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.go,.rs,.rb,.php,.sh,.bash,.sql,.css,.scss,.vue,.svelte,.mmd,.mermaid,.png,.jpg,.jpeg,.webp,.gif,.svg,.avif,.heic"
-        maxFileSize={64 * 1024 * 1024}
+        placeholder={busy ? queuePlaceholder : placeholder}
         hasContent={attachments.length > 0 || uploading}
-      >
-        {attachments.length || uploads.length ? (
-          <PromptInputAttachments>
+        uploading={uploading}
+        thinking={thinkingEnabled}
+        canThink={canThink}
+        onThinkingChange={onThinkingChange}
+        search={searchEnabled}
+        onSearchChange={onSearchChange}
+        accept={ATTACH_ACCEPT}
+        renderAttach={() => (
+          <AttachmentMenuButton
+            disabled={!actions.send}
+            accept={ATTACH_ACCEPT}
+            onFiles={(incoming) => onAttachFiles?.(incoming)}
+          />
+        )}
+        recording={voice === "recording"}
+        canVoice={canVoice}
+        onVoice={toggleVoice}
+        attachments={
+          attachments.length || uploads.length ? (
             <AttachmentCards
               attachments={attachments}
               uploads={uploads}
@@ -2013,44 +2085,9 @@ function MentorAgent({
               onPreviewImage={previewImage}
               onPreviewFile={(file) => setPreviewPath(file.path)}
             />
-          </PromptInputAttachments>
-        ) : null}
-        <PromptInputTextarea placeholder={busy ? queuePlaceholder : placeholder} />
-        <PromptInputToolbar className="gap-2">
-          <PromptInputTools className="min-w-0">
-            {/* Attach and voice share one small card, so they read as a set and stay on
-                the same baseline as Send. */}
-            <div
-              data-slot="composer-tools"
-              className="border-chatcn-border bg-chatcn-fill/60 shadow-chatcn-xs flex items-center gap-0.5 rounded-chatcn-md border p-0.5"
-            >
-              <AttachmentMenuButton className={toolButton} />
-              {canVoice ? (
-                <>
-                  <span aria-hidden="true" className="bg-chatcn-border h-5 w-px shrink-0" />
-                  <PromptInputButton
-                    tooltip={voice === "recording" ? "Stop recording" : "Voice input"}
-                    onClick={toggleVoice}
-                    size="icon-sm"
-                    data-testid="voice-composer"
-                    aria-label={voice === "recording" ? "Stop recording" : "Voice input"}
-                    className={cn(toolButton, voice === "recording" && "text-chatcn-red")}
-                  >
-                    {voice === "recording" ? (
-                      <MicOffIcon className="size-4" />
-                    ) : (
-                      <MicIcon className="size-4" />
-                    )}
-                  </PromptInputButton>
-                </>
-              ) : null}
-            </div>
-          </PromptInputTools>
-          <PromptInputActions>
-            <PromptInputSubmit />
-          </PromptInputActions>
-        </PromptInputToolbar>
-      </PromptInput>
+          ) : null
+        }
+      />
     </div>
   )
 
@@ -2060,8 +2097,14 @@ function MentorAgent({
     ? (workspaceFiles.find((file) => file.path === previewPath) ??
       attachments.find((file) => file.path === previewPath))
     : undefined
+  const previewUrl =
+    previewPath && fileUrl
+      ? fileUrl(
+          attachments.find((file) => file.path === previewPath)?.previewPath ?? previewPath,
+        )
+      : undefined
   const lightboxImages = pendingImages.map((file) => ({
-    src: fileUrl?.(file.path) ?? "",
+    src: fileUrl?.(file.previewPath ?? file.path) ?? "",
     alt: file.name,
     filename: file.name,
   }))
@@ -2235,14 +2278,14 @@ function MentorAgent({
             </>
           ) : null}
 
-          {previewPath && fileUrl ? (
+          {previewPath && previewUrl ? (
             <FilePreviewDialog
               open
               onOpenChange={(open) => {
                 if (!open) setPreviewPath(null)
               }}
               path={previewPath}
-              url={fileUrl(previewPath)}
+              url={previewUrl}
               size={previewFile?.size}
               onDownload={onDownloadFile}
               onOpenExternal={onOpenFile}

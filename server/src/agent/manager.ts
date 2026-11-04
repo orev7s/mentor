@@ -72,6 +72,11 @@ export interface SessionMeta {
   /** "provider/modelId" the user picked, if any. */
   model?: string;
   thinkingLevel: ThinkingLevel;
+  /**
+   * Whether the agent may use the web tools. The student can turn search off
+   * in the composer, which removes web_search and web_fetch from the tool set.
+   */
+  webAccess?: boolean;
   cwd: string;
   /** Pi JSONL session file, used to resume. */
   file?: string;
@@ -121,6 +126,24 @@ function appendSeed(manager: SessionManager, seed: SeedMessage[], model?: string
       stopReason: "stop",
       timestamp: now,
     } as unknown as Parameters<SessionManager["appendMessage"]>[0]);
+  }
+}
+
+/** The tools that search or read the web. Turning search off removes both. */
+const WEB_TOOLS = ["web_search", "web_fetch"];
+
+/**
+ * Add or remove the web tools without rebuilding the session. The tools stay
+ * registered, so flipping search back on later restores them immediately.
+ */
+function applyWebAccess(session: AgentSession, enabled: boolean): void {
+  const active = session.getActiveToolNames();
+  if (enabled) {
+    const next = [...active];
+    for (const name of WEB_TOOLS) if (!next.includes(name)) next.push(name);
+    session.setActiveToolsByName(next);
+  } else {
+    session.setActiveToolsByName(active.filter((name) => !WEB_TOOLS.includes(name)));
   }
 }
 
@@ -370,6 +393,7 @@ export class TutorSession {
       resourceLoader: await buildLoader(meta.cwd),
       customTools: buildTools(meta.cwd, questions),
     });
+    if (meta.webAccess === false) applyWebAccess(session, false);
     meta.file = manager.getSessionFile();
     if (model) meta.model = modelRef(model);
     return new TutorSession(meta, session, questions);
@@ -390,6 +414,7 @@ export class TutorSession {
       resourceLoader: await buildLoader(meta.cwd),
       customTools: buildTools(meta.cwd, questions),
     });
+    if (meta.webAccess === false) applyWebAccess(session, false);
     return new TutorSession(meta, session, questions);
   }
 
@@ -528,6 +553,12 @@ export class TutorSession {
     this.meta.updatedAt = Date.now();
   }
 
+  setWebAccess(enabled: boolean): void {
+    this.meta.webAccess = enabled;
+    this.meta.updatedAt = Date.now();
+    applyWebAccess(this.session, enabled);
+  }
+
   dispose(): void {
     this.questions.cancel();
     this.unsubscribe();
@@ -571,15 +602,17 @@ export class AgentManager {
 
   async update(
     id: string,
-    input: { model?: string; thinkingLevel?: ThinkingLevel },
+    input: { model?: string; thinkingLevel?: ThinkingLevel; webAccess?: boolean },
   ): Promise<SessionMeta> {
     const session = await this.get(id);
     if (input.model) await session.setModel(input.model);
     if (input.thinkingLevel) session.setThinkingLevel(input.thinkingLevel);
+    if (typeof input.webAccess === "boolean") session.setWebAccess(input.webAccess);
     const meta = this.index.find((entry) => entry.id === id);
     if (!meta) throw new Error(`Unknown session: ${id}`);
     meta.model = session.meta.model;
     meta.thinkingLevel = session.meta.thinkingLevel;
+    meta.webAccess = session.meta.webAccess;
     meta.updatedAt = Date.now();
     this.saveIndex();
     return meta;
@@ -598,6 +631,7 @@ export class AgentManager {
   async create(input: {
     model?: string;
     thinkingLevel?: ThinkingLevel;
+    webAccess?: boolean;
     title?: string;
     parent?: string;
     seed?: SeedMessage[];
@@ -612,6 +646,7 @@ export class AgentManager {
       title: input.title ?? "New chat",
       model: input.model,
       thinkingLevel: input.thinkingLevel ?? "medium",
+      webAccess: input.webAccess ?? true,
       cwd,
       parent: input.parent,
       createdAt: now,

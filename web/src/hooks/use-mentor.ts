@@ -240,6 +240,8 @@ export function useMentor() {
 
   const [model, setModelState] = useState<string | null>(null);
   const [thinkingLevel, setThinkingLevelState] = useState("medium");
+  /** Search is on by default: the agent may use web_search and web_fetch. */
+  const [searchEnabled, setSearchEnabledState] = useState(true);
 
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -254,6 +256,9 @@ export function useMentor() {
   const activeIdRef = useRef<string | null>(null);
   const modelRefValue = useRef<string | null>(null);
   const levelRef = useRef("medium");
+  /** The last thinking level that was not "off", restored when Think is turned back on. */
+  const lastThinkLevel = useRef("medium");
+  const searchRef = useRef(true);
   const filesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoConnected = useRef(false);
   /** Resolvers waiting for the next session snapshot, used when seeding a fork. */
@@ -681,7 +686,12 @@ export function useMentor() {
           }
           if (data.meta?.thinkingLevel) {
             levelRef.current = data.meta.thinkingLevel;
+            if (data.meta.thinkingLevel !== "off") lastThinkLevel.current = data.meta.thinkingLevel;
             setThinkingLevelState(data.meta.thinkingLevel);
+          }
+          if (typeof data.meta?.webAccess === "boolean") {
+            searchRef.current = data.meta.webAccess;
+            setSearchEnabledState(data.meta.webAccess);
           }
           setLoadingSession(false);
         } catch {
@@ -753,6 +763,7 @@ export function useMentor() {
         const level = saved.thinkingLevel ?? settings.defaultThinkingLevel ?? "medium";
         modelRefValue.current = chosen;
         levelRef.current = level;
+        if (level !== "off") lastThinkLevel.current = level;
         setModelState(chosen);
         setThinkingLevelState(level);
         savePrefs(chosen, level);
@@ -806,6 +817,7 @@ export function useMentor() {
       const created = await api.createSession({
         model: modelRefValue.current ?? undefined,
         thinkingLevel: levelRef.current,
+        webAccess: searchRef.current,
       });
       setSessions((prev) => [created.session, ...prev]);
       setActive(created.session.id);
@@ -825,6 +837,7 @@ export function useMentor() {
       const created = await api.createSession({
         model: modelRefValue.current ?? undefined,
         thinkingLevel: levelRef.current,
+        webAccess: searchRef.current,
       });
       setSessions((prev) => [created.session, ...prev]);
       setActive(created.session.id);
@@ -926,6 +939,7 @@ export function useMentor() {
         const created = await api.createSession({
           model: modelRefValue.current ?? undefined,
           thinkingLevel: levelRef.current,
+          webAccess: searchRef.current,
           parent: activeIdRef.current ?? undefined,
           seed,
           title,
@@ -992,7 +1006,13 @@ export function useMentor() {
           const result = await api.upload(id, file);
           setAttachments((prev) => [
             ...prev,
-            { name: file.name, path: result.path, size: result.size },
+            {
+              name: file.name,
+              path: result.path,
+              size: result.size,
+              thumbPath: result.thumbPath,
+              previewPath: result.previewPath,
+            },
           ]);
         } catch (cause) {
           setChatError(cause instanceof Error ? cause.message : String(cause));
@@ -1031,6 +1051,7 @@ export function useMentor() {
   const setThinkingLevel = useCallback(
     (level: string) => {
       levelRef.current = level;
+      if (level !== "off") lastThinkLevel.current = level;
       setThinkingLevelState(level);
       savePrefs(modelRefValue.current, level);
       const api = clientRef.current;
@@ -1045,6 +1066,33 @@ export function useMentor() {
       }
     },
     [refreshSessions, savePrefs],
+  );
+
+  /** The composer's Think switch: on restores the last level, off sends "off". */
+  const setThinkingEnabled = useCallback(
+    (enabled: boolean) => {
+      setThinkingLevel(enabled ? lastThinkLevel.current || "medium" : "off");
+    },
+    [setThinkingLevel],
+  );
+
+  /** The composer's Search switch. Off removes web_search and web_fetch from the session. */
+  const setSearchEnabled = useCallback(
+    (enabled: boolean) => {
+      searchRef.current = enabled;
+      setSearchEnabledState(enabled);
+      const api = clientRef.current;
+      const id = activeIdRef.current;
+      if (api && id) {
+        void api
+          .updateSession(id, { webAccess: enabled })
+          .then(() => refreshSessions())
+          .catch((cause: unknown) =>
+            setError(cause instanceof Error ? cause.message : String(cause)),
+          );
+      }
+    },
+    [refreshSessions],
   );
 
   /* ---------------------------------------------------------------- providers */
@@ -1163,6 +1211,14 @@ export function useMentor() {
   const configuredModels = models.filter((item) => configuredProviders.includes(item.provider));
   const activeModel = models.find((item) => modelRef(item) === model) ?? null;
 
+  // A model with no non-thinking mode cannot honour "off". When the student switches to one,
+  // put thinking back on so the hidden control never leaves the session in an invalid state.
+  useEffect(() => {
+    if (!activeModel || activeModel.canDisableThinking) return;
+    if (levelRef.current !== "off") return;
+    setThinkingLevel(lastThinkLevel.current || "medium");
+  }, [activeModel, setThinkingLevel]);
+
   return {
     url,
     token,
@@ -1186,6 +1242,11 @@ export function useMentor() {
     model,
     activeModel,
     thinkingLevel,
+    thinkingEnabled: thinkingLevel !== "off",
+    canThink: Boolean(activeModel?.canDisableThinking),
+    setThinkingEnabled,
+    searchEnabled,
+    setSearchEnabled,
     files,
     attachments,
     uploads,

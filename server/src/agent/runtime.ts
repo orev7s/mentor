@@ -28,6 +28,11 @@ export interface ModelSummary {
   id: string;
   name: string;
   reasoning: boolean;
+  /**
+   * True when the model can run with thinking turned off. Some reasoning models
+   * only exist in a thinking mode, so the Think control is hidden for them.
+   */
+  canDisableThinking: boolean;
   contextWindow: number;
   maxTokens: number;
   input: string[];
@@ -50,11 +55,17 @@ export async function listModels(): Promise<ModelSummary[]> {
     .map((model: AnyModel) => {
       const extra = declared.get(`${model.provider}|${model.id}`);
       const chat = model.type === "chat";
+      const reasoning = (chat && model.reasoning) || Boolean(extra?.reasoning);
+      // `null` on the "off" entry means the provider has no non-thinking mode.
+      const thinkingMap = (model as { thinkingLevelMap?: { off?: string | null } })
+        .thinkingLevelMap;
+      const offSupported = thinkingMap?.off !== null;
       return {
         provider: model.provider,
         id: model.id,
         name: model.name,
-        reasoning: (chat && model.reasoning) || Boolean(extra?.reasoning),
+        reasoning,
+        canDisableThinking: reasoning && offSupported,
         contextWindow: (chat ? model.contextWindow : 0) || extra?.contextWindow || 0,
         maxTokens: (chat ? model.maxTokens : 0) || extra?.maxTokens || 0,
         input: (chat && model.input.length ? model.input : extra?.input) ?? [],

@@ -282,6 +282,11 @@ export default function App() {
             composerModel={mentor.activeModel?.name ?? mentor.model ?? "Model"}
             onOpenModels={() => setModelOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
+            thinkingEnabled={mentor.thinkingEnabled}
+            canThink={mentor.canThink}
+            onThinkingChange={mentor.setThinkingEnabled}
+            searchEnabled={mentor.searchEnabled}
+            onSearchChange={mentor.setSearchEnabled}
             draftKey={mentor.activeId ?? "new"}
           />
         </div>

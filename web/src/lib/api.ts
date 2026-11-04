@@ -3,6 +3,8 @@ export interface ModelSummary {
   id: string;
   name: string;
   reasoning: boolean;
+  /** True when the model has a non-thinking mode, so the Think toggle makes sense. */
+  canDisableThinking: boolean;
   contextWindow: number;
   maxTokens: number;
   input: string[];
@@ -44,6 +46,8 @@ export interface SessionMeta {
   title: string;
   model?: string;
   thinkingLevel: string;
+  /** False when the student turned search off for this chat. */
+  webAccess?: boolean;
   cwd: string;
   parent?: string;
   createdAt: number;
@@ -62,6 +66,10 @@ export interface Attachment {
   name: string;
   path: string;
   size: number;
+  /** Small JPEG made by the server so phone photos load in the Android WebView. */
+  thumbPath?: string;
+  /** Larger JPEG for the lightbox and image viewer. */
+  previewPath?: string;
 }
 
 export class ApiError extends Error {
@@ -154,6 +162,7 @@ export class ApiClient {
   createSession(body: {
     model?: string;
     thinkingLevel?: string;
+    webAccess?: boolean;
     title?: string;
     parent?: string;
     seed?: { role: "user" | "assistant"; text: string }[];
@@ -165,7 +174,10 @@ export class ApiClient {
     return this.request<{ meta: SessionMeta; messages: unknown[] }>("GET", `/sessions/${id}`);
   }
 
-  updateSession(id: string, body: { model?: string; thinkingLevel?: string }) {
+  updateSession(
+    id: string,
+    body: { model?: string; thinkingLevel?: string; webAccess?: boolean },
+  ) {
     return this.request<{ session: SessionMeta }>("PATCH", `/sessions/${id}`, body);
   }
 
@@ -234,7 +246,7 @@ export class ApiClient {
   async upload(
     sessionId: string,
     file: File,
-  ): Promise<{ path: string; size: number; mime?: string }> {
+  ): Promise<{ path: string; size: number; mime?: string; thumbPath?: string; previewPath?: string }> {
     const form = new FormData();
     form.append("sessionId", sessionId);
     form.append("file", file);
@@ -244,7 +256,13 @@ export class ApiClient {
       body: form,
     });
     if (!res.ok) throw new ApiError(res.status, "Upload failed");
-    return (await res.json()) as { path: string; size: number; mime?: string };
+    return (await res.json()) as {
+      path: string;
+      size: number;
+      mime?: string;
+      thumbPath?: string;
+      previewPath?: string;
+    };
   }
 }
 

@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import multer from "multer";
@@ -27,6 +29,61 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 64 * 1024 * 1024 },
 });
+
+const run = promisify(execFile);
+
+/** Extensions the server can turn into a small JPEG for the app. */
+const PREVIEWABLE = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".avif",
+  ".heic",
+  ".heif",
+  ".tif",
+  ".tiff",
+]);
+
+/**
+ * Phone photos are often HEIC or far too large for the Android WebView decoder. Make a small
+ * JPEG thumbnail and a reasonably sized preview with ImageMagick, and let the app load those
+ * instead of the original. If conversion fails the upload still succeeds and the app falls
+ * back to the original file.
+ */
+async function makeImagePreviews(
+  target: string,
+  uploadsDir: string,
+  safeName: string,
+): Promise<{ thumbPath?: string; previewPath?: string }> {
+  if (!PREVIEWABLE.has(extname(target).toLowerCase())) return {};
+  const previewDir = join(uploadsDir, ".previews");
+  const thumbName = `${safeName}.thumb.jpg`;
+  const previewName = `${safeName}.preview.jpg`;
+  try {
+    mkdirSync(previewDir, { recursive: true });
+    await Promise.all([
+      run(
+        "magick",
+        [target, "-auto-orient", "-thumbnail", "480x480>", "-strip", "-quality", "82", join(previewDir, thumbName)],
+        { timeout: 20_000 },
+      ),
+      run(
+        "magick",
+        [target, "-auto-orient", "-thumbnail", "1600x1600>", "-strip", "-quality", "85", join(previewDir, previewName)],
+        { timeout: 30_000 },
+      ),
+    ]);
+    return {
+      thumbPath: `uploads/.previews/${thumbName}`,
+      previewPath: `uploads/.previews/${previewName}`,
+    };
+  } catch {
+    return {};
+  }
+}
 
 function asyncHandler(
   fn: (req: Request, res: Response) => Promise<void>,
@@ -167,13 +224,14 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
   app.post(
     "/sessions",
     asyncHandler(async (req, res) => {
-      const { model, thinkingLevel, title, parent, seed } = req.body ?? {};
+      const { model, thinkingLevel, webAccess, title, parent, seed } = req.body ?? {};
       const session = await manager.create({
         model: typeof model === "string" && model ? model : config.defaultModel,
         thinkingLevel:
           typeof thinkingLevel === "string"
             ? (thinkingLevel as ThinkingLevel)
             : (config.defaultThinkingLevel as ThinkingLevel | undefined),
+        webAccess: typeof webAccess === "boolean" ? webAccess : undefined,
         title,
         parent: typeof parent === "string" ? parent : undefined,
         seed: Array.isArray(seed)
@@ -208,6 +266,7 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
           typeof body.thinkingLevel === "string"
             ? (body.thinkingLevel as ThinkingLevel)
             : undefined,
+        webAccess: typeof body.webAccess === "boolean" ? body.webAccess : undefined,
       });
       res.json({ session: meta });
     }),
@@ -402,30 +461,30 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
 
   // --- uploads ---
 
-  app.post("/uploads", upload.single("file"), (req, res) => {
-    const sessionId = String(req.body?.sessionId ?? req.query.sessionId ?? "");
-    if (!sessionId || !req.file) {
-      res.status(400).json({ error: "sessionId and file are required" });
-      return;
-    }
-    manager
-      .get(sessionId)
-      .then((session) => {
-        const dir = join(session.meta.cwd, "uploads");
-        mkdirSync(dir, { recursive: true });
-        const safeName = basename(req.file!.originalname).replace(/[^\w.\- ]/g, "_");
-        const target = join(dir, safeName);
-        writeFileSync(target, req.file!.buffer);
-        res.status(201).json({
-          path: `uploads/${safeName}`,
-          size: req.file!.size,
-          mime: req.file!.mimetype,
-        });
-      })
-      .catch((error: unknown) => {
-        res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+  app.post(
+    "/uploads",
+    upload.single("file"),
+    asyncHandler(async (req, res) => {
+      const sessionId = String(req.body?.sessionId ?? req.query.sessionId ?? "");
+      if (!sessionId || !req.file) {
+        res.status(400).json({ error: "sessionId and file are required" });
+        return;
+      }
+      const session = await manager.get(sessionId);
+      const dir = join(session.meta.cwd, "uploads");
+      mkdirSync(dir, { recursive: true });
+      const safeName = basename(req.file.originalname).replace(/[^\w.\- ]/g, "_");
+      const target = join(dir, safeName);
+      writeFileSync(target, req.file.buffer);
+      const previews = await makeImagePreviews(target, dir, safeName);
+      res.status(201).json({
+        path: `uploads/${safeName}`,
+        size: req.file.size,
+        mime: req.file.mimetype,
+        ...previews,
       });
-  });
+    }),
+  );
 
   // Error handler.
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
