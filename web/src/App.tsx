@@ -264,6 +264,7 @@ export default function App() {
             suggestions={mentor.starters.map((label) => ({ label }))}
             onSuggestion={(prompt) => void mentor.send(prompt)}
             attachments={mentor.attachments}
+            uploads={mentor.uploads}
             onAttachFiles={(files) => void mentor.attachFiles(files)}
             onRemoveAttachment={mentor.removeAttachment}
             fileUrl={(path) => mentor.fileUrl(path)}

@@ -398,8 +398,8 @@ export class TutorSession {
     return () => this.subscribers.delete(listener);
   }
 
-  snapshot(): { meta: SessionMeta; messages: unknown } {
-    return { meta: this.meta, messages: this.session.messages };
+  snapshot(): { meta: SessionMeta; messages: unknown; busy: boolean } {
+    return { meta: this.meta, messages: this.session.messages, busy: this.busy || this.nudging };
   }
 
   async prompt(text: string): Promise<unknown> {

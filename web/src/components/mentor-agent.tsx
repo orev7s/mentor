@@ -197,6 +197,8 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
 
   /** Files the student attached but has not sent yet. */
   attachments?: Attachment[]
+  /** Files still uploading. Shown as placeholders and Send waits for them. */
+  uploads?: { id: string; name: string }[]
   /** Files from the attach button, paste or drop. */
   onAttachFiles?: (files: File[]) => void
   onRemoveAttachment?: (path: string) => void
@@ -1386,7 +1388,8 @@ function RemoveAttachmentButton({ name, onClick }: { name: string; onClick: () =
       className={cn(
         "chatcn-focus bg-chatcn-scrim text-chatcn-on-media absolute end-1.5 top-1.5 z-10 grid size-6 place-items-center rounded-full",
         "ease-chatcn-standard backdrop-blur-sm transition-[background-color,scale] duration-150 active:scale-90",
-        "hover:bg-chatcn-gray-900 pointer-coarse:size-9",
+        "after:absolute after:-inset-2 after:content-['']",
+        "hover:bg-chatcn-gray-900",
       )}
     >
       <XIcon className="size-3.5" />
@@ -1405,6 +1408,9 @@ function ImageAttachmentCard({
   onRemove: (path: string) => void
   onPreview: (file: Attachment) => void
 }) {
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => setFailed(false), [src])
+  const showImage = Boolean(src) && !failed
   return (
     <div data-slot="attachment" data-kind="image" className="relative w-24 min-w-0">
       <button
@@ -1414,17 +1420,18 @@ function ImageAttachmentCard({
         className="chatcn-focus border-chatcn-border bg-chatcn-fill hover:bg-chatcn-fill-hover block w-full overflow-hidden rounded-chatcn-lg border text-start transition-colors"
       >
         <span className="bg-chatcn-fill-hover block aspect-square w-full overflow-hidden">
-          {src ? (
+          {showImage ? (
             <img
               src={src}
-              alt={file.name}
+              alt=""
               loading="lazy"
               decoding="async"
+              onError={() => setFailed(true)}
               className="size-full object-cover"
             />
           ) : (
             <span className="text-chatcn-fg-subtle grid size-full place-items-center">
-              <ImageIcon className="size-6" />
+              <FileImageIcon className="size-6" />
             </span>
           )}
         </span>
@@ -1475,14 +1482,37 @@ function FileAttachmentCard({
  * Pending uploads as compact cards: images in a thumbnail grid, documents as icon cards. The grid
  * fills the composer width and folds to one column when there is no room for two.
  */
+function UploadingCard({ file }: { file: { name: string } }) {
+  return (
+    <div
+      data-slot="attachment"
+      data-kind="uploading"
+      aria-busy="true"
+      className="border-chatcn-border bg-chatcn-fill flex min-w-0 items-center gap-2.5 rounded-chatcn-lg border border-dashed p-2 pe-3"
+    >
+      <span className="bg-chatcn-bg-subtle text-chatcn-fg-subtle grid size-9 shrink-0 place-items-center rounded-chatcn-md">
+        <Spinner className="size-4" label="Uploading" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="chatcn-text-13 text-chatcn-fg block truncate font-medium">
+          {file.name}
+        </span>
+        <span className="chatcn-text-12 text-chatcn-fg-subtle block">Uploading...</span>
+      </span>
+    </div>
+  )
+}
+
 function AttachmentCards({
   attachments,
+  uploads,
   fileUrl,
   onRemove,
   onPreviewImage,
   onPreviewFile,
 }: {
   attachments: Attachment[]
+  uploads: { id: string; name: string }[]
   fileUrl?: (path: string) => string
   onRemove: (path: string) => void
   onPreviewImage: (file: Attachment) => void
@@ -1490,6 +1520,8 @@ function AttachmentCards({
 }) {
   const images = attachments.filter((file) => isImageAttachment(file.name))
   const docs = attachments.filter((file) => !isImageAttachment(file.name))
+  const hasDocs = docs.length > 0 || uploads.length > 0
+  if (!images.length && !hasDocs) return null
   return (
     <div className="flex flex-col gap-2">
       {images.length ? (
@@ -1505,8 +1537,11 @@ function AttachmentCards({
           ))}
         </div>
       ) : null}
-      {docs.length ? (
+      {hasDocs ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-2">
+          {uploads.map((file) => (
+            <UploadingCard key={file.id} file={file} />
+          ))}
           {docs.map((file) => (
             <FileAttachmentCard
               key={file.path}
@@ -1557,6 +1592,7 @@ function MentorAgent({
   emptyTitle = "What should we work on?",
   emptyDescription,
   attachments = [],
+  uploads = [],
   onAttachFiles,
   onRemoveAttachment,
   fileUrl,
@@ -1575,6 +1611,7 @@ function MentorAgent({
   ...props
 }: CodingAgentProps) {
   const busy = status === "submitted" || status === "streaming"
+  const uploading = uploads.length > 0
   const derived = React.useMemo(() => codingWorkspaceFromMessages(messages), [messages])
   const workspace: CodingWorkspace = { ...derived, ...workspaceProp }
   const { files, todos } = workspace
@@ -1691,6 +1728,7 @@ function MentorAgent({
 
   const submit = (text: string) => {
     const trimmed = text.trim()
+    if (uploading) return
     if ((!trimmed && attachments.length === 0) || !actions.send) return
     setDraft("")
     if (busy) {
@@ -1957,23 +1995,26 @@ function MentorAgent({
         onValueChange={setDraft}
         onSubmit={({ text }) => submit(text)}
         // While the agent works, an empty field offers Stop; typing turns it into Queue.
-        status={busy && !input.trim() ? "streaming" : "idle"}
+        status={busy && !input.trim() ? "streaming" : uploading ? "submitting" : "idle"}
         onStop={stop}
         disabled={!actions.send}
         onFiles={(incoming) => onAttachFiles?.(incoming)}
         accept=".pdf,.doc,.docx,.odt,.txt,.md,.markdown,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.xml,.ipynb,.tex,.py,.js,.jsx,.ts,.tsx,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.go,.rs,.rb,.php,.sh,.bash,.sql,.css,.scss,.vue,.svelte,.mmd,.mermaid,.png,.jpg,.jpeg,.webp,.gif,.svg,.avif,.heic"
         maxFileSize={64 * 1024 * 1024}
-        hasContent={attachments.length > 0}
+        hasContent={attachments.length > 0 || uploading}
       >
-        <PromptInputAttachments>
-          <AttachmentCards
-            attachments={attachments}
-            fileUrl={fileUrl}
-            onRemove={(path) => onRemoveAttachment?.(path)}
-            onPreviewImage={previewImage}
-            onPreviewFile={(file) => setPreviewPath(file.path)}
-          />
-        </PromptInputAttachments>
+        {attachments.length || uploads.length ? (
+          <PromptInputAttachments>
+            <AttachmentCards
+              attachments={attachments}
+              uploads={uploads}
+              fileUrl={fileUrl}
+              onRemove={(path) => onRemoveAttachment?.(path)}
+              onPreviewImage={previewImage}
+              onPreviewFile={(file) => setPreviewPath(file.path)}
+            />
+          </PromptInputAttachments>
+        ) : null}
         <PromptInputTextarea placeholder={busy ? queuePlaceholder : placeholder} />
         <PromptInputToolbar className="gap-2">
           <PromptInputTools className="min-w-0">

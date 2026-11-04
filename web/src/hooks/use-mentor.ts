@@ -243,6 +243,8 @@ export function useMentor() {
 
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /** Files still uploading, shown as placeholders so Send can wait for them. */
+  const [uploads, setUploads] = useState<{ id: string; name: string }[]>([]);
   const [tokensUsed, setTokensUsed] = useState(0);
 
   const clientRef = useRef<ApiClient | null>(null);
@@ -662,8 +664,17 @@ export function useMentor() {
           const data = JSON.parse((raw as MessageEvent).data) as {
             messages?: unknown[];
             meta?: SessionMeta;
+            busy?: boolean;
           };
           publish(messagesFromSnapshot(data.messages ?? []));
+          // The run keeps going on the server while the app is backgrounded. Reconcile the
+          // working state with the snapshot so returning shows the run, not a dead chat.
+          if (data.busy === true) setStatus("streaming");
+          else if (data.busy === false) {
+            setStatus((current) =>
+              current === "streaming" || current === "submitted" ? "ready" : current,
+            );
+          }
           if (data.meta?.model) {
             modelRefValue.current = data.meta.model;
             setModelState(data.meta.model);
@@ -777,6 +788,8 @@ export function useMentor() {
     publish([]);
     setFiles([]);
     setSessions([]);
+    setAttachments([]);
+    setUploads([]);
     setChatError(null);
     setStatus("ready");
     localStorage.removeItem(CONNECTION_KEY);
@@ -850,7 +863,7 @@ export function useMentor() {
     async (text: string) => {
       const trimmed = text.trim();
       const api = clientRef.current;
-      if (!api || (!trimmed && attachments.length === 0)) return;
+      if (!api || uploads.length || (!trimmed && attachments.length === 0)) return;
       const id = await ensureSession();
       if (!id) return;
 
@@ -879,7 +892,7 @@ export function useMentor() {
         setStatus("error");
       }
     },
-    [attachments, ensureSession, publish],
+    [attachments, ensureSession, publish, uploads.length],
   );
 
   /**
@@ -968,7 +981,13 @@ export function useMentor() {
       if (!api || !incoming.length) return;
       const id = await ensureSession();
       if (!id) return;
-      for (const file of incoming) {
+      // Show a placeholder per file before the first byte goes out. Send waits on these,
+      // so a prompt never leaves with a half-uploaded attachment.
+      const pending = incoming.map((file) => ({ id: nextId("up"), name: file.name }));
+      setUploads((prev) => [...prev, ...pending]);
+      for (let i = 0; i < incoming.length; i += 1) {
+        const file = incoming[i]!;
+        const placeholder = pending[i]!;
         try {
           const result = await api.upload(id, file);
           setAttachments((prev) => [
@@ -977,6 +996,8 @@ export function useMentor() {
           ]);
         } catch (cause) {
           setChatError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+          setUploads((prev) => prev.filter((item) => item.id !== placeholder.id));
         }
       }
       scheduleFiles();
@@ -1113,6 +1134,23 @@ export function useMentor() {
     }
   }, [connect]);
 
+  // Android can pause the WebView and drop the SSE socket while the app is in the
+  // background. The server keeps the run going, so reconnect on return to pick up
+  // the snapshot and anything that happened while the socket was down.
+  useEffect(() => {
+    const resubscribe = () => {
+      if (document.visibilityState === "hidden") return;
+      const id = activeIdRef.current;
+      if (id) connectStream(id, false);
+    };
+    document.addEventListener("visibilitychange", resubscribe);
+    window.addEventListener("focus", resubscribe);
+    return () => {
+      document.removeEventListener("visibilitychange", resubscribe);
+      window.removeEventListener("focus", resubscribe);
+    };
+  }, [connectStream]);
+
   useEffect(
     () => () => {
       closeStream();
@@ -1150,6 +1188,7 @@ export function useMentor() {
     thinkingLevel,
     files,
     attachments,
+    uploads,
     tokensUsed,
     starters: STARTERS,
     connect,
