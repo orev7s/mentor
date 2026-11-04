@@ -12,6 +12,11 @@ import { readFileSync } from "node:fs";
  *   node scripts/release-web.mjs 1.0.1
  *   node scripts/release-web.mjs 1.0.1 --local     # zip only, no upload
  *   node scripts/release-web.mjs 1.0.1 --skip-build
+ *   node scripts/release-web.mjs 1.0.9 --allow-apk-mismatch
+ *
+ * `--allow-apk-mismatch` attaches the mentor.apk that is already at the repo
+ * root even when its versionName is older than the web release. Use it when a
+ * web-only change should ship next to the current APK without rebuilding native.
  *
  * The release tag is `web-v<version>`, so the app can tell web bundles apart
  * from app releases. `index.html` sits at the zip root, which is what
@@ -24,9 +29,12 @@ const args = process.argv.slice(2);
 const version = args.find((arg) => !arg.startsWith("--"));
 const local = args.includes("--local");
 const skipBuild = args.includes("--skip-build");
+const allowApkMismatch = args.includes("--allow-apk-mismatch");
 
 if (!version || !/^\d+\.\d+(\.\d+)?$/.test(version)) {
-  console.error("Usage: node scripts/release-web.mjs <version> [--local] [--skip-build]");
+  console.error(
+    "Usage: node scripts/release-web.mjs <version> [--local] [--skip-build] [--allow-apk-mismatch]",
+  );
   console.error("Example: node scripts/release-web.mjs 1.0.1");
   process.exit(1);
 }
@@ -41,12 +49,20 @@ const tag = `web-v${version}`;
 const gradle = readFileSync(join(root, "android/app/build.gradle"), "utf8");
 const nativeVersion = gradle.match(/versionName\s+"([^"]+)"/)?.[1];
 const withApk = existsSync(apkPath);
-if (withApk && nativeVersion && nativeVersion !== version) {
+const apkMismatch = withApk && Boolean(nativeVersion) && nativeVersion !== version;
+if (apkMismatch && !allowApkMismatch) {
   console.error(
     `mentor.apk is versionName ${nativeVersion} but this release is ${version}. ` +
-      `Bump versionName in android/app/build.gradle, rebuild, then release.`,
+      `Bump versionName in android/app/build.gradle, rebuild, then release. ` +
+      `To attach the existing APK to a web-only release anyway, pass --allow-apk-mismatch.`,
   );
   process.exit(1);
+}
+if (apkMismatch && allowApkMismatch) {
+  console.warn(
+    `Attaching the existing mentor.apk (versionName ${nativeVersion}) to the ${version} web release. ` +
+      `Installed apps still get the web bundle over the air; a fresh APK install starts on ${nativeVersion} and updates itself.`,
+  );
 }
 if (!withApk && nativeVersion && nativeVersion !== version) {
   console.log(
@@ -85,7 +101,12 @@ if (local) {
 const assetPaths = withApk ? [zipPath, apkPath] : [zipPath];
 const title = withApk ? `Mentor ${version}` : `Web ${version}`;
 const notes = withApk
-  ? `Native app release (versionName ${version}) with the matching web bundle.
+  ? apkMismatch
+    ? `Web update ${version} with the current Android app (versionName ${nativeVersion}).
+
+- mentor.apk: the Android app. There is no native change in this release, so it stays on ${nativeVersion}. It stages the web bundle on launch and applies it on the next open.
+- mentor-web-${version}.zip: the web bundle existing installs download silently.`
+    : `Native app release (versionName ${version}) with the matching web bundle.
 
 - mentor.apk: the Android app. Side-load it.
 - mentor-web-${version}.zip: the web bundle the app downloads on launch for silent updates.

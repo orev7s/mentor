@@ -34,7 +34,8 @@ calls stay in the thread.
   needs a decision before it starts
 - voice: a mic records a clip, the server transcribes it with Groq Whisper, and
   the text lands in the composer. Turkish, Arabic and English. Every agent reply
-  has a Read aloud button that uses the Android system text-to-speech engine
+  has a small Read aloud icon button next to Copy and Fork that uses the Android
+  system text-to-speech engine
 - attachments in the composer (PDF, DOCX, images, text) that the agent reads with
   `read_document`/`ocr_image`
 - at the end of every run, a card listing the files that run created or changed,
@@ -44,6 +45,10 @@ calls stay in the thread.
   with Open, which asks which installed app should open the file
 - copy on every message, Read aloud on every agent reply, and Fork from here to
   branch a chat at any turn
+- the composer keeps a draft per chat, so a prompt typed before the app was
+  killed is still there on the next launch
+- long-term memory: the agent can save, change, forget or list facts about the
+  student, but only when the student explicitly asks
 
 When a free model runs out of quota, the server benches it and moves the chat to
 another configured free model on its own, then replays the turn. The student
@@ -67,18 +72,41 @@ adds:
 | Tool | Does |
 | --- | --- |
 | `todo_write` | Publishes the plan the UI pins above the composer |
+| `todo_clear` | Clears the plan once the task is finished |
 | `share_file` | Hands the student one file as a download card |
 | `ask_student` | Asks up to six multiple-choice questions and waits for the answers |
 | `read_document` | Extracts text from PDF, DOCX, HTML, Markdown and text |
 | `ocr_image` | OCRs a photo or scan with tesseract.js |
+| `memory` | Saves, updates, deletes or lists facts about the student, only on request |
 | `web_search` | Exa when `EXA_API_KEY` is set, else keyless Bing HTML |
 | `web_fetch` | Fetches a page and converts it to readable text |
 
 Every tool is scoped to the session workspace. A tutor system prompt is appended
-to Pi's default prompt: teach step by step, plan with `todo_write`, cite sources,
-save deliverables in the workspace so they appear in Files, and install any
-missing command or library itself before telling the student a format is
-unsupported.
+to Pi's default prompt: teach step by step, plan with `todo_write` and close the
+list with `todo_clear`, cite sources, save deliverables in the workspace so they
+appear in Files, and use the pre-installed tools before installing anything.
+
+The model often plans and then forgets to close the items it finished, so when a
+run settles with anything still pending or in progress the server nudges it once
+in a hidden turn to reconcile the list. That nudge never shows up as a student
+message.
+
+## Pre-install the document tools
+
+The agent runs on a server that already has the usual document, PDF and OCR
+tools, so it does not spend a turn (or two minutes) on `apt-get` while the
+student waits. Install them once when provisioning:
+
+```bash
+sudo server/scripts/install-tools.sh
+```
+
+poppler-utils, tesseract (English/Turkish/Arabic), ocrmypdf, ghostscript, qpdf,
+ImageMagick, pandoc, LibreOffice, TeX Live, WeasyPrint, ffmpeg, graphviz,
+ripgrep and jq. The script is idempotent; set `MENTOR_SKIP_HEAVY=1` to skip
+LibreOffice and TeX Live on a small machine. The server probes for these
+commands at session start and lists the ones it finds in the system prompt, so
+the agent knows what it can use.
 
 ## Run the server
 

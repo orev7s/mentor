@@ -48,6 +48,7 @@ config.json                 server token, host, port, defaults
 providers.json via models.json  custom providers (Pi models.json format)
 pi-agent/auth.json          API keys for built-in providers
 pi-agent/models.json        custom OpenAI-compatible providers
+memories.json               long-term facts the student asked the agent to keep
 workspaces/<sessionId>/     per-session working dir; uploads go to uploads/
 sessions/                   Pi JSONL session files
 sessions.json               our session index (title, model, timestamps)
@@ -119,17 +120,37 @@ session workspace. `customTools` adds to that set. Added as custom tools:
 | Tool | Does |
 | --- | --- |
 | `todo_write` | Publishes the plan; the UI pins it above the composer |
+| `todo_clear` | Clears the plan once the task is done, so the pinned list does not linger |
 | `share_file` | Offers one workspace file as a download card in the reply |
 | `ask_student` | Asks one to six multiple-choice questions and waits for the answer |
 | `read_document` | Extract text from PDF (unpdf), DOCX (mammoth), HTML (turndown), MD/TXT |
 | `ocr_image` | OCR an image with tesseract.js (offline) |
+| `memory` | Save, update, delete or list long-term facts about the student, only on request |
 | `web_search` | Exa when `EXA_API_KEY` is set, else keyless Bing HTML (DuckDuckGo only as a last resort) |
 | `web_fetch` | Fetch a URL, readability to markdown |
 
 Every file tool refuses paths outside the workspace. A tutor system prompt is
 appended to Pi's default prompt (teach step by step, plan with `todo_write`,
-cite sources, save deliverables in the workspace so Files shows them, install a
-missing command or library before saying a format is unsupported).
+cite sources, save deliverables in the workspace so Files shows them).
+
+The server pre-installs a document, PDF and OCR toolset so the agent does not
+wait on `apt-get` mid-turn: poppler-utils, tesseract with English/Turkish/Arabic
+models, ocrmypdf, ghostscript, qpdf, ImageMagick, pandoc, LibreOffice, TeX Live,
+WeasyPrint, ffmpeg, graphviz, ripgrep and jq. `server/scripts/install-tools.sh`
+installs them (idempotent, `MENTOR_SKIP_HEAVY=1` skips LibreOffice and TeX Live).
+At session start the server probes for these commands and puts the live list in
+the system prompt, so the agent knows what it can use and only installs a
+replacement when one of them is missing or fails.
+
+When a run settles with a plan still marked pending or in progress, the server
+sends the model one hidden reminder (`sendCustomMessage`, role `custom`, never
+shown as a student turn) to reconcile `todo_write` or call `todo_clear`, so the
+pinned list matches reality without the student having to ask.
+
+Long-term memory is one `memories.json` in the data dir, shared by every chat.
+The agent may only write to it when the student explicitly asks; the file is
+also copied into the system prompt so a fact saved in one chat is known in the
+next.
 
 `ask_student` holds the tool call open on a per-session broker until the client
 posts answers to `/sessions/:id/answers`. The answers become the tool result, so
@@ -158,7 +179,7 @@ card renders again and the broker still holds the wait.
 - Messages share one centered column. The student's turns keep a filled bubble,
   the agent's stay flat, and both are centered rather than pinned to opposite
   edges. Every message has Copy; every message has Fork from here; every agent
-  reply has Read aloud.
+  reply has Read aloud as a small icon button beside them.
 - Voice: the mic records in the WebView, the server sends the clip to Groq
   Whisper (`POST /transcribe`) and the text lands in the composer. It works in
   Turkish, Arabic and English. Read aloud goes through a `Speaker` plugin that
@@ -172,7 +193,10 @@ card renders again and the broker still holds the wait.
   leaves the new chat ready for the next question. Seeds are text only: Pi is
   given real user and assistant messages, never a tool call without its result.
 - The composer keeps only attach, voice and send. Model and provider settings
-  live in the overflow menu, so the chat has one obvious place to type.
+  live in the overflow menu, so the chat has one obvious place to type. A
+  half-written prompt is saved per chat in `localStorage` and restored when the
+  student comes back, even if the app was killed and cleared from the
+  background.
 - Downloads on Android go through a `Downloader` plugin that hands the URL to
   the system `DownloadManager`. The server sends `Content-Disposition` with the
   real name and extension, so a PDF lands as `report.pdf` in Downloads. The

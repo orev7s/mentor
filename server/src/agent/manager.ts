@@ -13,6 +13,8 @@ import { ensureDirs, paths } from "../config.js";
 import { listWorkspaceFiles } from "../files.js";
 import { buildTools } from "../tools/index.js";
 import { QuestionBroker, type AskAnswer } from "../tools/ask.js";
+import { memoryStore } from "../tools/memory.js";
+import { toolsInventoryMarkdown } from "./tools-inventory.js";
 import { benchModel, isBenched, isQuotaError, pickFallback, unbenchModel } from "./failover.js";
 import { modelRef, resolveModelRef } from "./runtime.js";
 
@@ -28,19 +30,37 @@ You are Mentor, a patient one-on-one tutor for a single student. Teach the way a
 - Write Markdown. Use $...$ or $$...$$ for math.
 - When the student shares a file, read it with read_document (PDF, DOCX, HTML, text) or ocr_image (photos and scans) before answering.
 - Use web_search and web_fetch for facts that may have changed, and cite the URLs you used.
-- For any task that takes more than a couple of steps, call todo_write first, then update it as you work. The student sees the plan live above the composer.
+- For any task that takes more than a couple of steps, call todo_write before you start. Then call todo_write again after every step, sending the whole list with the real status of each item (pending, in_progress, completed, blocked, skipped, failed, cancelled). Never leave an item in_progress when it is done. Before your final answer, call todo_write one last time so the pinned plan matches what actually happened. When the task is over and the remaining plan would only be noise, call todo_clear. This is not optional bookkeeping: the student watches that list to see what you are doing.
+- The server has a set of document, PDF and OCR tools already installed. They are listed below. Use them first through bash; do not install a replacement unless the listed tool is missing, it fails with an error, or the student asks for something else. If you do install something, keep it to one command and say what you installed.
+- Long-term memory: only write to the memory tool when the student explicitly asks you to remember, change or forget something. Never save an inferred fact. Use memory with action list before updating or deleting, so you target the right id. Do not use it as a scratchpad.
 - You can write files and run bash inside the session workspace. When you make a deliverable (PDF, slide deck, worksheet, diagram, script, study notes), save it in the workspace root with a clear filename, run what you need to verify it, then call share_file with its path so the student gets a download card. Keep the prose short: say what it is, then share it.
-- You can install missing tools yourself. If a command, library or format tool is missing (pdftotext, pandoc, LibreOffice, a Python package, an npm package), install it with apt-get, pip, npm, or the package manager that fits, then retry. Do not tell the student a format is unsupported until you have tried to install what you need. If installation is blocked, say exactly what is missing and offer a plain-text or Markdown alternative.
 - The student sees a Files panel with everything in the workspace, and an automatic list of the files you created or changed in each run. Do not paste a whole file into chat when the student can download it.
 - When you need a decision or want to check understanding, use ask_student with one to six multiple-choice questions. It waits for the student and returns their answers. Use it when the student asks to be quizzed, when their level or goal is unclear, or before a task where the wrong format would waste their time. Do not use it for every little thing: one good question beats five.
 - Never claim a file or command worked unless the tool result confirms it. If a command fails, read the error and try another approach.
 - If the student has not named their level, assume a motivated secondary school or early university student.`;
 
 async function buildLoader(cwd: string): Promise<DefaultResourceLoader> {
+  const [inventory, memories] = await Promise.all([
+    toolsInventoryMarkdown(),
+    Promise.resolve(memoryStore.toText()),
+  ]);
+  const sections = [TUTOR_INSTRUCTIONS];
+  if (inventory) sections.push(inventory);
+  if (memories) {
+    sections.push(
+      [
+        "## What you remember about the student",
+        "",
+        "These are long-term facts the student asked you to keep. Use them naturally; do not recite the list unless asked.",
+        "",
+        memories,
+      ].join("\n"),
+    );
+  }
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir: paths.agentDir,
-    appendSystemPromptOverride: (base) => [...base, TUTOR_INSTRUCTIONS],
+    appendSystemPromptOverride: (base) => [...base, ...sections],
   });
   await loader.reload();
   return loader;
@@ -145,6 +165,39 @@ function toWireEvent(event: AgentSessionEvent): unknown {
   }
 }
 
+/** One item of the plan, as the server needs it for the finish-the-plan nudge. */
+export interface TodoSnapshotItem {
+  content: string;
+  status: string;
+}
+
+/** Read the todo list out of a `todo_write` call, tolerating a JSON-string arg. */
+function todosFromArgs(args: unknown): TodoSnapshotItem[] | null {
+  let value: unknown = args;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const list = (value as { todos?: unknown }).todos ?? (value as { items?: unknown }).items;
+  if (!Array.isArray(list)) return null;
+  return list.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const item = raw as { content?: unknown; title?: unknown; status?: unknown };
+    const content =
+      typeof item.content === "string"
+        ? item.content
+        : typeof item.title === "string"
+          ? item.title
+          : "";
+    if (!content) return [];
+    return [{ content, status: typeof item.status === "string" ? item.status : "pending" }];
+  });
+}
+
 export class TutorSession {
   readonly meta: SessionMeta;
   private session: AgentSession;
@@ -161,12 +214,25 @@ export class TutorSession {
   private quotaError: string | null = null;
   /** One failover per turn. A second quota error just surfaces. */
   private failoverTried = false;
+  /** The latest plan written this turn, used to nudge the agent to finish it. */
+  private turnTodos: TodoSnapshotItem[] | null = null;
+  /** One todo nudge per turn, so a stubborn list cannot loop. */
+  private todoNudged = false;
+  /** True while the hidden todo-reconciliation turn is running. */
+  private nudging = false;
 
   private constructor(meta: SessionMeta, session: AgentSession, questions: QuestionBroker) {
     this.meta = meta;
     this.session = session;
     this.questions = questions;
     this.unsubscribe = session.subscribe((event) => {
+      // Track the plan as the agent writes it, so the settle handler knows whether
+      // anything is still unfinished. todo_clear removes it.
+      if (event.type === "tool_execution_start") {
+        const raw = event as unknown as { toolName?: string; args?: unknown };
+        if (raw.toolName === "todo_write") this.turnTodos = todosFromArgs(raw.args);
+        else if (raw.toolName === "todo_clear") this.turnTodos = [];
+      }
       // A quota error ends the turn before any answer. Hold it back: the settle handler switches
       // to another free model and replays the turn, so the student never sees a dead end.
       if (event.type === "message_end") {
@@ -185,18 +251,27 @@ export class TutorSession {
       // List the run's files before the client hears that the run settled, so the
       // artifacts card lands inside the assistant message it belongs to.
       if (event.type === "agent_settled") {
-        void (async () => {
-          if (this.quotaError && (await this.failover())) {
+        const aborted = Boolean((event as unknown as { aborted?: boolean }).aborted);
+        if (this.quotaError) {
+          void (async () => {
+            if (await this.failover()) {
+              this.publish(toWireEvent(event));
+              return;
+            }
+            await this.emitArtifacts();
             this.publish(toWireEvent(event));
-            return;
-          }
-          await this.emitArtifacts();
-          this.publish(toWireEvent(event));
-          // No other model to move to: now the error is honest.
-          if (this.quotaError) {
+            // No other model to move to: now the error is honest.
             this.publish({ type: "error", message: this.quotaError });
             this.quotaError = null;
-          }
+          })();
+          return;
+        }
+        const shouldNudge = !aborted && !this.todoNudged && this.hasUnfinishedTodos();
+        if (shouldNudge) this.nudging = true;
+        void (async () => {
+          await this.emitArtifacts();
+          this.publish(toWireEvent(event));
+          if (shouldNudge) this.runTodoNudge();
         })();
         return;
       }
@@ -227,6 +302,58 @@ export class TutorSession {
     } catch {
       // a failed listing must not stop the run
     }
+  }
+
+  /** True when this turn's plan still has work marked pending or in progress. */
+  private hasUnfinishedTodos(): boolean {
+    const todos = this.turnTodos;
+    if (!todos?.length) return false;
+    return todos.some(
+      (item) => item.status === "pending" || item.status === "in_progress",
+    );
+  }
+
+  /**
+   * The model often plans with todo_write and then forgets to close the items it
+   * finished. When a run settles with work still marked pending or in_progress,
+   * send one hidden reminder and let it reconcile the list in a short follow-up
+   * turn. The reminder is a custom message (role "custom"), so it never shows up
+   * as a student turn in the app or the transcript.
+   */
+  private runTodoNudge(): void {
+    const todos = this.turnTodos;
+    if (!todos?.length) {
+      this.nudging = false;
+      return;
+    }
+    this.todoNudged = true;
+
+    const lines = todos
+      .map((item) => `- [${item.status}] ${item.content}`)
+      .join("\n");
+    const reminder = [
+      "Your plan still has unfinished items:",
+      lines,
+      "",
+      "Before you finish, call todo_write one more time with the whole list and the real final status of every item. If the plan is complete and no longer useful, call todo_clear instead. Then give the student one short line about the outcome. Do not repeat the work and do not mention this reminder.",
+    ].join("\n");
+
+    void (async () => {
+      this.busy = true;
+      this.runStartedAt = Date.now();
+      try {
+        await this.session.sendCustomMessage(
+          { customType: "mentor:todos", content: reminder, display: false },
+          { triggerTurn: true },
+        );
+      } catch {
+        // bookkeeping must never surface as a failed turn
+      } finally {
+        this.busy = false;
+        this.nudging = false;
+        this.meta.updatedAt = Date.now();
+      }
+    })();
   }
 
   static async create(meta: SessionMeta, seed: SeedMessage[] = []): Promise<TutorSession> {
@@ -276,11 +403,13 @@ export class TutorSession {
   }
 
   async prompt(text: string): Promise<unknown> {
-    if (this.busy) return this.session.followUp(text);
+    if (this.busy || this.nudging) return this.session.followUp(text);
     this.busy = true;
     this.lastPromptText = text;
     this.failoverTried = false;
     this.quotaError = null;
+    this.turnTodos = null;
+    this.todoNudged = false;
     await this.preflightModel();
     return this.run(text);
   }

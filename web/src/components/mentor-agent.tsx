@@ -156,6 +156,11 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   onOpenModels?: () => void
   /** Opens providers and settings from the overflow menu. */
   onOpenSettings?: () => void
+  /**
+   * Where the composer draft is saved, usually the active session id. The draft is
+   * restored when the student comes back, even after the app was killed.
+   */
+  draftKey?: string
 
   /** Override the derived workspace. Each key replaces only its own part. */
   workspace?: Partial<CodingWorkspace>
@@ -228,6 +233,7 @@ const EDIT_TOOLS = new Set(["edit_file", "edit", "str_replace", "apply_patch", "
 const WRITE_TOOLS = new Set(["write_file", "write", "create_file"])
 const SHELL_TOOLS = new Set(["bash", "shell", "run_command", "terminal", "exec_command"])
 const TODO_TOOLS = new Set(["todo_write", "todowrite", "write_todos", "update_todos"])
+const TODO_CLEAR_TOOLS = new Set(["todo_clear", "clear_todos"])
 const READ_TOOLS = new Set(["read_file", "read", "view", "open_file", "cat"])
 
 const toolKey = (part: ChatcnToolPart) =>
@@ -336,6 +342,10 @@ function codingWorkspaceFromMessages(messages: ChatcnMessage[]): CodingWorkspace
         if (next.length) todos = next
         continue
       }
+      if (TODO_CLEAR_TOOLS.has(key)) {
+        todos = []
+        continue
+      }
       const change = fileChange(part)
       if (!change) continue
       const prev = files.get(change.path)
@@ -375,6 +385,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
   edit: "Editing a file",
   edit_file: "Editing a file",
   todo_write: "Planning the work",
+  todo_clear: "Clearing the plan",
   share_file: "Preparing a file",
   ask_student: "Waiting for your answer",
 }
@@ -455,6 +466,21 @@ function ToolTodoWritePart(props: ToolRendererProps) {
     >
       {items.length ? <TodoList items={items} variant="compact" /> : undefined}
     </ToolCall>
+  )
+}
+
+/**
+ * A cleared plan: the pinned list is gone, and the trace keeps one quiet row so
+ * the student can see that it was cleared on purpose.
+ */
+function ToolTodoClearPart(props: ToolRendererProps) {
+  return (
+    <ToolCall
+      {...toolBasePropsFromPart(props)}
+      name="todo_clear"
+      icon={<ListChecksIcon />}
+      title="Cleared the plan"
+    />
   )
 }
 
@@ -641,6 +667,7 @@ const defaultToolRenderers: ToolRendererMap = {
   todo_write: ToolTodoWritePart,
   TodoWrite: ToolTodoWritePart,
   write_todos: ToolTodoWritePart,
+  todo_clear: ToolTodoClearPart,
   share_file: ToolShareFilePart,
   ask_student: ToolAskStudentPart,
 }
@@ -814,11 +841,8 @@ const AgentMessage = React.memo(function AgentMessage({
       <MessageAction
         label={speaking ? "Stop reading" : "Read aloud"}
         onClick={() => onSpeak(message)}
-        size="sm"
-        className="border-chatcn-border bg-chatcn-card hover:bg-chatcn-fill-hover gap-1.5 rounded-chatcn-sm border"
       >
         {speaking ? <VolumeXIcon className="size-4" /> : <Volume2Icon className="size-4" />}
-        <span className="chatcn-text-12 font-medium">{speaking ? "Stop" : "Read aloud"}</span>
       </MessageAction>
     ) : null
 
@@ -1173,6 +1197,7 @@ function MentorAgent({
   composerModel,
   onOpenModels,
   onOpenSettings,
+  draftKey = "default",
   workspace: workspaceProp,
   toolRenderers = defaultToolRenderers,
   workspaceTab: tabProp,
@@ -1212,6 +1237,37 @@ function MentorAgent({
   const [selected, setSelected] = React.useState<string | null>(null)
   const [queue, setQueue] = useControllable(queueProp, defaultQueue, onQueueChange)
   const [input, setInput] = React.useState("")
+  // Keep the latest draft in a ref so voice transcription and submit can build on
+  // it without a stale closure.
+  const inputRef = React.useRef("")
+  inputRef.current = input
+  const writeDraft = React.useCallback((value: string) => {
+    try {
+      const key = `mentor.draft:${draftKey}`
+      if (value) window.localStorage.setItem(key, value)
+      else window.localStorage.removeItem(key)
+    } catch {
+      // storage may be unavailable; the draft just will not survive a restart
+    }
+  }, [draftKey])
+  const setDraft = React.useCallback(
+    (value: string) => {
+      setInput(value)
+      writeDraft(value)
+    },
+    [writeDraft],
+  )
+  // Load the draft for this chat when it changes; typing persisted it already.
+  React.useEffect(() => {
+    let saved = ""
+    try {
+      saved = window.localStorage.getItem(`mentor.draft:${draftKey}`) ?? ""
+    } catch {
+      saved = ""
+    }
+    setInput(saved)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
   const [stopped, setStopped] = React.useState<ReadonlySet<string>>(() => new Set())
   // Voice input: recording, then transcribing. `voiceError` shows in the listening bar.
   const [voice, setVoice] = React.useState<"idle" | "recording" | "transcribing">("idle")
@@ -1275,7 +1331,7 @@ function MentorAgent({
   const submit = (text: string) => {
     const trimmed = text.trim()
     if ((!trimmed && attachments.length === 0) || !actions.send) return
-    setInput("")
+    setDraft("")
     if (busy) {
       setQueue([...queue, { id: `queued-${++queueSeq}`, text: trimmed, mode: "after-run" }])
       return
@@ -1318,7 +1374,10 @@ function MentorAgent({
         }
         setVoice("transcribing")
         const text = await onTranscribe?.(clip)
-        if (text) setInput((prev) => (prev ? `${prev} ${text}` : text))
+        if (text) {
+          const next = inputRef.current ? `${inputRef.current} ${text}` : text
+          setDraft(next)
+        }
         setVoice("idle")
       } catch (cause) {
         setVoice("idle")
@@ -1517,7 +1576,7 @@ function MentorAgent({
       ) : null}
       <PromptInput
         value={input}
-        onValueChange={setInput}
+        onValueChange={setDraft}
         onSubmit={({ text }) => submit(text)}
         // While the agent works, an empty field offers Stop; typing turns it into Queue.
         status={busy && !input.trim() ? "streaming" : "idle"}

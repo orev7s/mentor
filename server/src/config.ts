@@ -37,6 +37,8 @@ export const paths = {
   sessions: join(dataDir, "sessions"),
   /** Our own session index. */
   sessionIndex: join(dataDir, "sessions.json"),
+  /** Long-term facts the student asked us to remember, shared across sessions. */
+  memories: join(dataDir, "memories.json"),
 };
 
 export function ensureDirs(): void {

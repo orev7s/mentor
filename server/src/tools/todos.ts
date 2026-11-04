@@ -20,7 +20,7 @@ export function buildTodoTool() {
     name: "todo_write",
     label: "Write todos",
     description:
-      "Write or update your plan for the current task. Send the whole list every time. Use it for any multi-step work (research, essay, revision plan, script or PDF), and update the statuses as you go.",
+      "Write or update your plan for the current task. Send the whole list every time, with the real status of every item. Use it for any multi-step work (research, essay, revision plan, script or PDF). Call it when you start, again after each step (mark what is done, what is in progress, what is still pending), and one final time before your last answer so the pinned list matches what actually happened.",
     parameters: Type.Object({
       todos: Type.Array(
         Type.Object({
@@ -47,5 +47,24 @@ export function buildTodoTool() {
         details: { todos: params.todos, total: params.todos.length, done },
       };
     },
+  });
+}
+
+/**
+ * Removes the pinned plan once the task is over. The client treats this as the
+ * end of the list, so the todo card disappears instead of lingering with items
+ * that are no longer relevant.
+ */
+export function buildTodoClearTool() {
+  return defineTool({
+    name: "todo_clear",
+    label: "Clear todos",
+    description:
+      "Clear the plan completely. Use it when a multi-step task is finished and the plan is no longer useful, or when the student changes direction and the old list would be misleading. Call todo_write one last time first if you want the final statuses to be seen.",
+    parameters: Type.Object({}),
+    execute: async () => ({
+      content: [{ type: "text" as const, text: "Plan cleared." }],
+      details: { cleared: true },
+    }),
   });
 }

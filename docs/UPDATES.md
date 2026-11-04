@@ -56,6 +56,12 @@ in one place. That is the usual release: one tag, two assets, `mentor.apk` plus
 `mentor-web-<version>.zip`. The script refuses to publish when the APK's
 `versionName` does not match the release version, so the two never drift.
 
+Pass `--allow-apk-mismatch` to attach the existing APK to a newer web-only
+release anyway. The release notes say the APK's real `versionName`; installed
+apps still get the web bundle over the air, and a fresh install starts on the
+older native version and updates itself. `Mentor 1.0.9` was shipped this way
+with the `1.0.8` APK.
+
 Pass `--local` to only build and zip, then upload the files yourself. Pass
 `--skip-build` when `dist` is already current. Note that npm needs a `--` to
 forward those flags: `npm run release:web 1.0.1 -- --skip-build`.

@@ -18,16 +18,24 @@ import {
 } from "@/lib/files";
 
 const TODO_TOOLS = new Set(["todo_write", "todowrite", "write_todos", "update_todos"]);
+const TODO_CLEAR_TOOLS = new Set(["todo_clear", "clear_todos"]);
 
 /**
  * The model sometimes sends only the item it just finished instead of the whole list.
- * Merge every todo update by title so the pinned plan keeps all of its steps.
+ * Merge every todo update by title so the pinned plan keeps all of its steps. A
+ * todo_clear call resets the merge, so a finished plan does not linger.
  */
 function mergedTodos(messages: ChatcnMessage[]): TodoItem[] {
   const byTitle = new Map<string, TodoItem>();
   for (const message of messages) {
     for (const part of message.parts) {
-      if (!isToolPart(part) || !TODO_TOOLS.has(getToolName(part))) continue;
+      if (!isToolPart(part)) continue;
+      const name = getToolName(part);
+      if (TODO_CLEAR_TOOLS.has(name)) {
+        byTitle.clear();
+        continue;
+      }
+      if (!TODO_TOOLS.has(name)) continue;
       for (const item of todosFrom(part.input)) byTitle.set(item.title, item);
     }
   }
@@ -240,6 +248,7 @@ export default function App() {
             composerModel={mentor.activeModel?.name ?? mentor.model ?? "Model"}
             onOpenModels={() => setModelOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
+            draftKey={mentor.activeId ?? "new"}
           />
         </div>
       </main>
