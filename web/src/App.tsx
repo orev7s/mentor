@@ -234,6 +234,7 @@ export default function App() {
             attachments={mentor.attachments}
             onAttachFiles={(files) => void mentor.attachFiles(files)}
             onRemoveAttachment={mentor.removeAttachment}
+            fileUrl={(path) => mentor.fileUrl(path)}
             onForkMessage={(message) => void mentor.forkMessage(message)}
             files={mentor.files}
             onOpenFile={(path) => void openFile(mentor.fileUrl(path))}

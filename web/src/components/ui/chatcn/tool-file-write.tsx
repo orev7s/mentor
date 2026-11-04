@@ -10,6 +10,7 @@ import {
   toolBasePropsFromPart,
 } from "@/components/ui/chatcn/tool-fallback"
 import { ToolCodePreview } from "@/components/ui/chatcn/tool-file-read"
+import { languageFromPath, languageLabel } from "@/lib/chatcn-highlighter"
 import { FileCodeIcon, FilePlus2Icon } from "@/lib/chatcn-icons"
 
 interface ToolFileWriteProps extends ToolBaseProps {
@@ -69,7 +70,13 @@ function ToolFileWrite({
         </span>
       </div>
       {content ? (
-        <ToolCodePreview code={content} maxLines={previewLines} className="rounded-none" />
+        <ToolCodePreview
+          code={content}
+          language={languageFromPath(path)}
+          label={languageLabel(languageFromPath(path))}
+          maxLines={previewLines}
+          className="rounded-none"
+        />
       ) : (
         <p className="chatcn-text-12 text-chatcn-fg-subtle px-3 pb-2.5">Empty file</p>
       )}

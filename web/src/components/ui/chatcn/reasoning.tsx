@@ -1,7 +1,7 @@
 import { Collapsible } from "@base-ui/react/collapsible"
 import * as React from "react"
 import { ShimmerText } from "@/components/ui/chatcn/shimmer-text"
-import { useChatcnAutoHeight, useChatcnStickToBottom } from "@/hooks/use-chatcn-auto-height"
+import { useChatcnStickToBottom } from "@/hooks/use-chatcn-auto-height"
 import {
   formatChatcnDuration,
   speakChatcnDuration,
@@ -131,7 +131,6 @@ function Reasoning({
       ? "Thought for a few seconds"
       : `Thought for ${formatChatcnDuration(Math.max(ms, 1000), { precise: false })}`
 
-  const { innerRef, height } = useChatcnAutoHeight({ enabled: streaming && open })
   const scrollRef = useChatcnStickToBottom(text, { enabled: streaming })
 
   const isCard = variant === "card"
@@ -256,26 +255,24 @@ function Reasoning({
           "data-[starting-style]:h-0 data-[starting-style]:opacity-0",
         )}
       >
-        {/* Smooth height while streaming: the outer box eases to the measured inner height. */}
+        {/*
+         * One scroll region, not a measured wrapper around one. An animated wrapper whose height
+         * lagged behind the content was clamping the last lines, and a scroll container with no
+         * bottom padding put the final line flush against the edge. The panel already animates
+         * open; the region grows to `max-h` and owns its own padding.
+         */}
         <div
-          style={{ height }}
-          className="ease-chatcn-out overflow-hidden transition-[height] duration-200 motion-reduce:transition-none"
+          ref={scrollRef}
+          data-slot="reasoning-content"
+          className={cn(
+            "chatcn-text-13 text-chatcn-fg-muted chatcn-scroll flex max-h-72 flex-col gap-2 overflow-y-auto text-pretty [scroll-padding-block-end:1rem]",
+            isCard && "px-3.5 pt-0.5 pb-3.5",
+            variant === "inline" &&
+              "border-chatcn-border ms-[15.5px] mt-1 mb-2 border-s ps-[17.5px] pb-2",
+            isMinimal && "border-chatcn-border mt-1 mb-2 border-s ps-3 pb-2",
+          )}
         >
-          <div ref={innerRef}>
-            <div
-              ref={scrollRef}
-              data-slot="reasoning-content"
-              className={cn(
-                "chatcn-text-13 text-chatcn-fg-muted chatcn-scroll flex max-h-72 flex-col gap-2 overflow-y-auto text-pretty",
-                isCard && "px-3.5 pt-0.5 pb-3.5",
-                variant === "inline" &&
-                  "border-chatcn-border ms-[15.5px] mt-1 mb-2 border-s ps-[17.5px]",
-                isMinimal && "border-chatcn-border mt-1 mb-2 border-s ps-3",
-              )}
-            >
-              {body}
-            </div>
-          </div>
+          {body}
         </div>
       </Collapsible.Panel>
 

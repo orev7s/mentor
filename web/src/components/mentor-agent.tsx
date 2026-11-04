@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { ChangedFiles } from "@/components/ui/chatcn/changed-files"
+import { buttonVariants } from "@/components/ui/chatcn/button"
 import {
   Conversation,
   ConversationContent,
@@ -9,6 +10,8 @@ import {
 } from "@/components/ui/chatcn/conversation"
 import { DiffViewer } from "@/components/ui/chatcn/diff-viewer"
 import { EmptyState } from "@/components/ui/chatcn/empty-state"
+import { FilePreviewDialog } from "@/components/ui/chatcn/file-preview"
+import { ImageLightbox } from "@/components/ui/chatcn/image"
 import { Markdown } from "@/components/ui/chatcn/markdown"
 import {
   Menu,
@@ -26,13 +29,13 @@ import { type MessagePartComponents, MessageParts } from "@/components/ui/chatcn
 import {
   PromptInput,
   PromptInputActions,
-  PromptInputAttachButton,
   PromptInputAttachments,
   PromptInputButton,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
+  usePromptInput,
 } from "@/components/ui/chatcn/prompt-input"
 import { type QueuedMessage, QueuedMessages } from "@/components/ui/chatcn/queued-messages"
 import { Reasoning, reasoningPropsFromPart } from "@/components/ui/chatcn/reasoning"
@@ -70,14 +73,17 @@ import {
   EllipsisIcon,
   FileCodeIcon,
   FileIcon,
+  FileImageIcon,
   FileTextIcon,
   FolderIcon,
   GitForkIcon,
   ImageIcon,
+  ImagePlusIcon,
   ListChecksIcon,
   MicIcon,
   MicOffIcon,
   ModelIcon,
+  PaperclipIcon,
   RefreshCwIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -193,6 +199,8 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   /** Files from the attach button, paste or drop. */
   onAttachFiles?: (files: File[]) => void
   onRemoveAttachment?: (path: string) => void
+  /** Builds the URL a workspace file is served from. Used for thumbnails and previews. */
+  fileUrl?: (path: string) => string
 
   /** Branch the conversation at a message, seeding a new chat with the turns before it. */
   onForkMessage?: (message: ChatcnMessage) => void
@@ -1269,6 +1277,250 @@ function ToolShareFilePart(props: ToolRendererProps) {
 }
 
 /* -------------------------------------------------------------------------------------------------
+ * Composer attachments
+ * -----------------------------------------------------------------------------------------------*/
+
+const IMAGE_FILE = /\.(png|jpe?g|webp|gif|svg|avif|bmp|heic|ico)$/i
+const CODE_FILE = new Set([
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "py",
+  "rs",
+  "go",
+  "rb",
+  "php",
+  "java",
+  "kt",
+  "kts",
+  "swift",
+  "c",
+  "h",
+  "cpp",
+  "cc",
+  "hpp",
+  "cs",
+  "sh",
+  "bash",
+  "zsh",
+  "sql",
+  "yaml",
+  "yml",
+  "json",
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "md",
+  "markdown",
+  "mmd",
+  "vue",
+  "svelte",
+])
+
+function isImageAttachment(name: string) {
+  return IMAGE_FILE.test(name)
+}
+
+function extensionOf(name: string) {
+  const dot = name.lastIndexOf(".")
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : ""
+}
+
+function AttachmentFileIcon({ name }: { name: string }) {
+  const ext = extensionOf(name)
+  if (ext === "pdf" || ext === "doc" || ext === "docx" || ext === "txt") return <FileTextIcon />
+  if (CODE_FILE.has(ext)) return <FileCodeIcon />
+  return <FileIcon />
+}
+
+/** The paperclip, now a small menu so an image never has to go through the document picker. */
+function AttachmentMenuButton({ className }: { className?: string }) {
+  const { openFilePicker, openImagePicker, acceptsFiles, disabled } = usePromptInput()
+  if (!acceptsFiles) return null
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label="Add attachment"
+        title="Add attachment"
+        disabled={disabled}
+        data-slot="prompt-input-attach"
+        data-testid="attach-menu"
+        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), className)}
+      >
+        <PaperclipIcon />
+      </MenuTrigger>
+      <MenuContent side="top" align="start" sideOffset={8} className="min-w-52">
+        <MenuGroup>
+          <MenuLabel>Add attachment</MenuLabel>
+          <MenuItem onClick={openImagePicker} data-testid="attach-image">
+            <ImagePlusIcon />
+            Add image
+          </MenuItem>
+          <MenuItem onClick={openFilePicker} data-testid="attach-file">
+            <FileTextIcon />
+            Add file
+          </MenuItem>
+        </MenuGroup>
+      </MenuContent>
+    </Menu>
+  )
+}
+
+function RemoveAttachmentButton({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Remove ${name}`}
+      title="Remove"
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      className={cn(
+        "chatcn-focus bg-chatcn-scrim text-chatcn-on-media absolute end-1.5 top-1.5 z-10 grid size-6 place-items-center rounded-full",
+        "ease-chatcn-standard backdrop-blur-sm transition-[background-color,scale] duration-150 active:scale-90",
+        "hover:bg-chatcn-gray-900 pointer-coarse:size-9",
+      )}
+    >
+      <XIcon className="size-3.5" />
+    </button>
+  )
+}
+
+function ImageAttachmentCard({
+  file,
+  src,
+  onRemove,
+  onPreview,
+}: {
+  file: Attachment
+  src?: string
+  onRemove: (path: string) => void
+  onPreview: (file: Attachment) => void
+}) {
+  return (
+    <div data-slot="attachment" data-kind="image" className="relative w-24 min-w-0">
+      <button
+        type="button"
+        onClick={() => onPreview(file)}
+        title={file.name}
+        className="chatcn-focus border-chatcn-border bg-chatcn-fill hover:bg-chatcn-fill-hover block w-full overflow-hidden rounded-chatcn-lg border text-start transition-colors"
+      >
+        <span className="bg-chatcn-fill-hover block aspect-square w-full overflow-hidden">
+          {src ? (
+            <img
+              src={src}
+              alt={file.name}
+              loading="lazy"
+              decoding="async"
+              className="size-full object-cover"
+            />
+          ) : (
+            <span className="text-chatcn-fg-subtle grid size-full place-items-center">
+              <ImageIcon className="size-6" />
+            </span>
+          )}
+        </span>
+        <span className="chatcn-text-12 text-chatcn-fg-muted block truncate px-2 py-1.5">
+          {file.name}
+        </span>
+      </button>
+      <RemoveAttachmentButton name={file.name} onClick={() => onRemove(file.path)} />
+    </div>
+  )
+}
+
+function FileAttachmentCard({
+  file,
+  onRemove,
+  onPreview,
+}: {
+  file: Attachment
+  onRemove: (path: string) => void
+  onPreview: (file: Attachment) => void
+}) {
+  return (
+    <div data-slot="attachment" data-kind="file" className="relative min-w-0">
+      <button
+        type="button"
+        onClick={() => onPreview(file)}
+        title={file.name}
+        className="chatcn-focus border-chatcn-border bg-chatcn-fill hover:bg-chatcn-fill-hover flex w-full min-w-0 items-center gap-2.5 rounded-chatcn-lg border p-2 pe-9 text-start transition-colors"
+      >
+        <span className="bg-chatcn-bg-subtle text-chatcn-fg-subtle grid size-9 shrink-0 place-items-center rounded-chatcn-md [&_svg]:size-5">
+          <AttachmentFileIcon name={file.name} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="chatcn-text-13 text-chatcn-fg block truncate font-medium">
+            {file.name}
+          </span>
+          <span className="chatcn-text-12 text-chatcn-fg-subtle block truncate tabular-nums">
+            {[extensionOf(file.name).toUpperCase() || "FILE", formatBytes(file.size)].join(" · ")}
+          </span>
+        </span>
+      </button>
+      <RemoveAttachmentButton name={file.name} onClick={() => onRemove(file.path)} />
+    </div>
+  )
+}
+
+/**
+ * Pending uploads as compact cards: images in a thumbnail grid, documents as icon cards. The grid
+ * fills the composer width and folds to one column when there is no room for two.
+ */
+function AttachmentCards({
+  attachments,
+  fileUrl,
+  onRemove,
+  onPreviewImage,
+  onPreviewFile,
+}: {
+  attachments: Attachment[]
+  fileUrl?: (path: string) => string
+  onRemove: (path: string) => void
+  onPreviewImage: (file: Attachment) => void
+  onPreviewFile: (file: Attachment) => void
+}) {
+  const images = attachments.filter((file) => isImageAttachment(file.name))
+  const docs = attachments.filter((file) => !isImageAttachment(file.name))
+  return (
+    <div className="flex flex-col gap-2">
+      {images.length ? (
+        <div className="flex flex-wrap gap-2">
+          {images.map((file) => (
+            <ImageAttachmentCard
+              key={file.path}
+              file={file}
+              src={fileUrl?.(file.path)}
+              onRemove={onRemove}
+              onPreview={onPreviewImage}
+            />
+          ))}
+        </div>
+      ) : null}
+      {docs.length ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-2">
+          {docs.map((file) => (
+            <FileAttachmentCard
+              key={file.path}
+              file={file}
+              onRemove={onRemove}
+              onPreview={onPreviewFile}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------------------------------
  * CodingAgent
  * -----------------------------------------------------------------------------------------------*/
 
@@ -1306,6 +1558,7 @@ function MentorAgent({
   attachments = [],
   onAttachFiles,
   onRemoveAttachment,
+  fileUrl,
   onForkMessage,
   files: workspaceFiles = [],
   onOpenFile,
@@ -1328,6 +1581,9 @@ function MentorAgent({
   const [, setTab] = useControllable(tabProp, defaultWorkspaceTab, onWorkspaceTabChange)
   const [view, setView] = React.useState<CodingWorkspaceTab | null>(null)
   const [selected, setSelected] = React.useState<string | null>(null)
+  // A workspace file opened in the in-app viewer, and the image pager for pending uploads.
+  const [previewPath, setPreviewPath] = React.useState<string | null>(null)
+  const [lightbox, setLightbox] = React.useState<number | null>(null)
   const [queue, setQueue] = useControllable(queueProp, defaultQueue, onQueueChange)
   const [input, setInput] = React.useState("")
   // Keep the latest draft in a ref so voice transcription and submit can build on
@@ -1527,17 +1783,27 @@ function MentorAgent({
     setSelected(path)
   }
 
+  // Pending image attachments, for the pager opened from a thumbnail.
+  const pendingImages = React.useMemo(
+    () => attachments.filter((file) => isImageAttachment(file.name)),
+    [attachments],
+  )
+  const previewImage = (file: Attachment) => {
+    const index = pendingImages.findIndex((item) => item.path === file.path)
+    setLightbox(index >= 0 ? index : 0)
+  }
+
   const partContext = React.useMemo<PartContextValue>(
     () => ({
       renderers: toolRenderers,
       approve: actions.approve,
       deny: actions.deny,
       split: true,
-      onOpenFile,
+      onOpenFile: (path) => setPreviewPath(path),
       onDownloadFile,
       onAnswerQuestions,
     }),
-    [toolRenderers, actions.approve, actions.deny, onOpenFile, onDownloadFile, onAnswerQuestions],
+    [toolRenderers, actions.approve, actions.deny, onDownloadFile, onAnswerQuestions],
   )
 
   React.useEffect(() => {
@@ -1676,29 +1942,18 @@ function MentorAgent({
         onStop={stop}
         disabled={!actions.send}
         onFiles={(incoming) => onAttachFiles?.(incoming)}
-        accept=".pdf,.docx,.txt,.md,.html,.htm,.csv,.json,.png,.jpg,.jpeg,.webp,.py,.js,.ts,.ipynb"
+        accept=".pdf,.doc,.docx,.odt,.txt,.md,.markdown,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.xml,.ipynb,.tex,.py,.js,.jsx,.ts,.tsx,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.go,.rs,.rb,.php,.sh,.bash,.sql,.css,.scss,.vue,.svelte,.mmd,.mermaid,.png,.jpg,.jpeg,.webp,.gif,.svg,.avif,.heic"
         maxFileSize={64 * 1024 * 1024}
         hasContent={attachments.length > 0}
       >
         <PromptInputAttachments>
-          {attachments.map((file) => (
-            <span
-              key={file.path}
-              data-slot="attachment"
-              className="border-chatcn-border bg-chatcn-fill text-chatcn-fg-muted rounded-chatcn-md flex h-7 min-w-0 items-center gap-1.5 border ps-2 pe-1"
-            >
-              <FileTextIcon className="size-3.5 shrink-0" />
-              <span className="chatcn-text-12 max-w-[12rem] truncate">{file.name}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${file.name}`}
-                onClick={() => onRemoveAttachment?.(file.path)}
-                className="hover:bg-chatcn-fill-hover hover:text-chatcn-fg rounded-chatcn-sm flex size-5 items-center justify-center"
-              >
-                <XIcon className="size-3" />
-              </button>
-            </span>
-          ))}
+          <AttachmentCards
+            attachments={attachments}
+            fileUrl={fileUrl}
+            onRemove={(path) => onRemoveAttachment?.(path)}
+            onPreviewImage={previewImage}
+            onPreviewFile={(file) => setPreviewPath(file.path)}
+          />
         </PromptInputAttachments>
         <PromptInputTextarea placeholder={busy ? queuePlaceholder : placeholder} />
         <PromptInputToolbar className="gap-2">
@@ -1709,11 +1964,7 @@ function MentorAgent({
               data-slot="composer-tools"
               className="border-chatcn-border bg-chatcn-fill/60 shadow-chatcn-xs flex items-center gap-0.5 rounded-chatcn-md border p-0.5"
             >
-              <PromptInputAttachButton
-                tooltip="Attach a document"
-                size="icon-sm"
-                className={toolButton}
-              />
+              <AttachmentMenuButton className={toolButton} />
               {canVoice ? (
                 <>
                   <span aria-hidden="true" className="bg-chatcn-border h-5 w-px shrink-0" />
@@ -1745,12 +1996,22 @@ function MentorAgent({
 
   const viewLabel = view === "files" ? "Files" : view === "changes" ? "Changes" : ""
 
+  const previewFile = previewPath
+    ? (workspaceFiles.find((file) => file.path === previewPath) ??
+      attachments.find((file) => file.path === previewPath))
+    : undefined
+  const lightboxImages = pendingImages.map((file) => ({
+    src: fileUrl?.(file.path) ?? "",
+    alt: file.name,
+    filename: file.name,
+  }))
+
   const panel = (which: CodingWorkspaceTab) => (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {which === "files" ? (
         <FilesView
           files={workspaceFiles}
-          onOpen={onOpenFile}
+          onOpen={setPreviewPath}
           onDownload={onDownloadFile}
           onRefresh={onRefreshFiles}
         />
@@ -1896,6 +2157,32 @@ function MentorAgent({
                 {panel(view)}
               </section>
             </>
+          ) : null}
+
+          {previewPath && fileUrl ? (
+            <FilePreviewDialog
+              open
+              onOpenChange={(open) => {
+                if (!open) setPreviewPath(null)
+              }}
+              path={previewPath}
+              url={fileUrl(previewPath)}
+              size={previewFile?.size}
+              onDownload={onDownloadFile}
+              onOpenExternal={onOpenFile}
+            />
+          ) : null}
+
+          {lightbox !== null && fileUrl && lightboxImages.length ? (
+            <ImageLightbox
+              images={lightboxImages}
+              index={lightbox}
+              onIndexChange={setLightbox}
+              open
+              onOpenChange={(open) => {
+                if (!open) setLightbox(null)
+              }}
+            />
           ) : null}
         </div>
       </PartContext.Provider>

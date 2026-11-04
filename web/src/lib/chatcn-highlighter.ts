@@ -198,6 +198,83 @@ const ALIASES: Record<string, string> = {
   plaintext: "text",
   txt: "text",
   plain: "text",
+  mmd: "mermaid",
+  mermaid: "mermaid",
+  svg: "xml",
+  htm: "html",
+}
+
+const EXT_LANGUAGE: Record<string, string> = {
+  py: "python",
+  pyw: "python",
+  ipynb: "json",
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  jsx: "jsx",
+  ts: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  tsx: "tsx",
+  html: "html",
+  htm: "html",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  json: "json",
+  jsonc: "jsonc",
+  rs: "rust",
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  hh: "cpp",
+  java: "java",
+  kt: "kotlin",
+  kts: "kotlin",
+  swift: "swift",
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  fish: "bash",
+  sql: "sql",
+  yaml: "yaml",
+  yml: "yaml",
+  toml: "toml",
+  md: "markdown",
+  markdown: "markdown",
+  mdx: "mdx",
+  mmd: "mermaid",
+  mermaid: "mermaid",
+  go: "go",
+  rb: "ruby",
+  php: "php",
+  cs: "csharp",
+  xml: "xml",
+  vue: "vue",
+  svelte: "svelte",
+  graphql: "graphql",
+  gql: "graphql",
+  prisma: "prisma",
+  diff: "diff",
+  patch: "diff",
+  txt: "text",
+  log: "text",
+  csv: "text",
+  tsv: "text",
+}
+
+/** Resolves the language of a workspace file from its extension. */
+export function languageFromPath(path?: string | null): string {
+  const name = (path ?? "").split(/[\\/]/).pop() ?? ""
+  const dot = name.lastIndexOf(".")
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : ""
+  if (ext) return EXT_LANGUAGE[ext] ?? ext
+  if (/^dockerfile$/i.test(name)) return "docker"
+  if (/^makefile$/i.test(name)) return "text"
+  return "text"
 }
 
 const LABELS: Record<string, string> = {

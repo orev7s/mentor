@@ -30,6 +30,8 @@ interface PromptInputContextValue {
   submitOn: SubmitOn
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
   openFilePicker: () => void
+  /** Opens the picker filtered to `image/*`, for photos and screenshots. */
+  openImagePicker: () => void
   /** False when no `onFiles` handler is set. */
   acceptsFiles: boolean
   handlePaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void
@@ -138,6 +140,7 @@ function PromptInput({
   const value = controlled ? valueProp : valueState
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const imageInputRef = React.useRef<HTMLInputElement>(null)
 
   const setValue = React.useCallback(
     (next: string) => {
@@ -160,8 +163,16 @@ function PromptInput({
   }
 
   const limits = { accept, maxSize: maxFileSize, maxFiles }
-  const deliver = (files: File[], source: FileSource) => {
-    const { accepted, rejected } = sortFiles(files, limits)
+  const deliver = (
+    files: File[],
+    source: FileSource,
+    overrides?: { accept?: string; maxFiles?: number },
+  ) => {
+    const { accepted, rejected } = sortFiles(files, {
+      maxSize: maxFileSize,
+      accept: overrides?.accept ?? accept,
+      maxFiles: overrides?.maxFiles ?? maxFiles,
+    })
     if (accepted.length) onFiles?.(accepted, source)
     if (rejected.length) onFilesRejected?.(rejected)
   }
@@ -201,6 +212,7 @@ function PromptInput({
     submitOn,
     textareaRef,
     openFilePicker: () => fileInputRef.current?.click(),
+    openImagePicker: () => imageInputRef.current?.click(),
     acceptsFiles: Boolean(onFiles),
     handlePaste,
   }
@@ -280,6 +292,23 @@ function PromptInput({
               className="hidden"
               onChange={(event) => {
                 deliver(Array.from(event.target.files ?? []), "picker")
+                event.target.value = ""
+              }}
+            />
+            <input
+              ref={imageInputRef}
+              type="file"
+              multiple
+              accept="image/*"
+              tabIndex={-1}
+              aria-hidden="true"
+              className="hidden"
+              onChange={(event) => {
+                // Bypass the document `accept` list: the picker already filtered to images.
+                deliver(Array.from(event.target.files ?? []), "picker", {
+                  accept: "image/*",
+                  maxFiles: undefined,
+                })
                 event.target.value = ""
               }}
             />

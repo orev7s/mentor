@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Button } from "@/components/ui/chatcn/button"
+import { CopyButton } from "@/components/ui/chatcn/copy-button"
 import { ToolCall } from "@/components/ui/chatcn/tool-call"
 import {
   isToolRunning,
@@ -15,15 +16,25 @@ import {
   type ToolRendererProps,
   toolBasePropsFromPart,
 } from "@/components/ui/chatcn/tool-fallback"
+import { useChatcnHighlight } from "@/hooks/use-chatcn-highlight"
+import {
+  type ChatcnTokenLine,
+  chatcnTokenClass,
+  languageFromPath,
+  languageLabel,
+} from "@/lib/chatcn-highlighter"
 import { ChevronDownIcon, FileTextIcon } from "@/lib/chatcn-icons"
 import { cn } from "@/lib/utils"
 
 /* -------------------------------------------------------------------------------------------------
- * ToolCodePreview: code with a line number gutter. Shared by file read, write and code exec.
+ * ToolCodePreview: code with a line number gutter, syntax highlighted. Shared by file read,
+ * write and code exec.
  * -----------------------------------------------------------------------------------------------*/
 
 interface ToolCodePreviewProps extends Omit<React.ComponentProps<"div">, "children"> {
   code: string
+  /** Fence language, or an id resolved from the file name. Unknown ids stay plain. */
+  language?: string
   /** Number of the first line. Defaults to 1. */
   startLine?: number
   /**
@@ -35,6 +46,8 @@ interface ToolCodePreviewProps extends Omit<React.ComponentProps<"div">, "childr
   highlight?: number[]
   /** Optional label above the code, for example the language. */
   label?: React.ReactNode
+  /** Show a copy action in the label row. On when a label is present. */
+  copyable?: boolean
 }
 
 function CodeLines({
@@ -43,12 +56,12 @@ function CodeLines({
   width,
   highlight,
 }: {
-  lines: string[]
+  lines: ChatcnTokenLine[]
   first: number
   width: number
   highlight?: number[]
 }) {
-  return lines.map((line, i) => {
+  return lines.map((tokens, i) => {
     const n = first + i
     const on = highlight?.includes(n)
     return (
@@ -63,8 +76,20 @@ function CodeLines({
         >
           {n}
         </span>
-        <span className={cn("whitespace-pre", on ? "text-chatcn-fg" : "text-chatcn-fg-muted")}>
-          {line || " "}
+        <span
+          className={cn(
+            "whitespace-pre",
+            on ? "text-chatcn-fg" : "text-chatcn-fg-muted",
+            tokens.length === 0 && "min-h-5",
+          )}
+        >
+          {tokens.length === 0
+            ? " "
+            : tokens.map((token, index) => (
+                <span key={index} className={chatcnTokenClass[token.role]}>
+                  {token.content}
+                </span>
+              ))}
         </span>
       </span>
     )
@@ -73,14 +98,17 @@ function CodeLines({
 
 function ToolCodePreview({
   code,
+  language,
   startLine = 1,
   maxLines,
   highlight,
   label,
+  copyable,
   className,
   ...props
 }: ToolCodePreviewProps) {
-  const all = code.replace(/\n$/, "").split("\n")
+  const source = code.replace(/\n$/, "")
+  const { lines: all } = useChatcnHighlight(source, language)
   const foldable = maxLines !== undefined && all.length > maxLines + 3
   const head = foldable ? all.slice(0, maxLines) : all
   const tail = foldable ? all.slice(maxLines) : []
@@ -97,15 +125,22 @@ function ToolCodePreview({
     requestAnimationFrame(() => requestAnimationFrame(() => setOpen(true)))
   }
 
+  const showLabel = label !== undefined && label !== null
+  const showCopy = copyable ?? showLabel
+
   return (
     <div
       data-slot="tool-code-preview"
+      data-language={language}
       data-state={foldable ? (open ? "open" : "closed") : undefined}
       className={cn("rounded-chatcn-md bg-chatcn-inset min-w-0 overflow-hidden", className)}
       {...props}
     >
-      {label ? (
-        <div className="chatcn-text-12 text-chatcn-fg-subtle px-3 pt-2 font-medium">{label}</div>
+      {showLabel || showCopy ? (
+        <div className="text-chatcn-fg-subtle flex h-8 items-center gap-2 ps-3 pe-1">
+          <span className="chatcn-text-12 min-w-0 flex-1 truncate font-medium">{label}</span>
+          {showCopy ? <CopyButton value={source} label="Copy code" /> : null}
+        </div>
       ) : null}
       {/* biome-ignore lint/a11y/useSemanticElements: a labelled scroll region, not a form fieldset */}
       <div
@@ -114,7 +149,8 @@ function ToolCodePreview({
         role="group"
         aria-label="File contents"
         className={cn(
-          "rounded-chatcn-md focus-visible:outline-chatcn-accent chatcn-scroll max-h-72 overflow-auto pt-2 outline-none focus-visible:outline-2 focus-visible:-outline-offset-2",
+          "rounded-chatcn-md focus-visible:outline-chatcn-accent chatcn-scroll max-h-72 overflow-auto outline-none focus-visible:outline-2 focus-visible:-outline-offset-2",
+          showLabel || showCopy ? "pt-0 pb-0" : "pt-2",
           foldable ? "pb-0" : "pb-2",
         )}
       >
@@ -215,7 +251,13 @@ function ToolFileRead({
   const body =
     done && content !== undefined ? (
       content.length > 0 ? (
-        <ToolCodePreview code={content} startLine={startLine} maxLines={maxLines} />
+        <ToolCodePreview
+          code={content}
+          language={languageFromPath(path)}
+          startLine={startLine}
+          maxLines={maxLines}
+          label={languageLabel(languageFromPath(path))}
+        />
       ) : (
         <p className="chatcn-text-13 text-chatcn-fg-subtle">The file is empty.</p>
       )
