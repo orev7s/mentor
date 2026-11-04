@@ -1,14 +1,21 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMentor } from "@/hooks/use-mentor";
 import { ConnectScreen } from "@/components/ConnectScreen";
 import { SessionRail } from "@/components/SessionRail";
 import { ModelDialog } from "@/components/ModelDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
+import { DownloadToast, type SavedFile } from "@/components/DownloadToast";
 import { MentorAgent, todosFrom } from "@/components/mentor-agent";
 import type { TodoItem } from "@/components/ui/chatcn/todo-list";
 import { PanelLeftIcon, XIcon } from "@/lib/chatcn-icons";
 import { getToolName, isToolPart, type ChatcnMessage } from "@/lib/chatcn-types";
-import { downloadFile, fileName, openFile } from "@/lib/files";
+import {
+  downloadFile,
+  downloadStatus,
+  fileName,
+  openDownload,
+  openFile,
+} from "@/lib/files";
 
 const TODO_TOOLS = new Set(["todo_write", "todowrite", "write_todos", "update_todos"]);
 
@@ -33,7 +40,54 @@ export default function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [saved, setSaved] = useState<SavedFile | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const todos = useMemo(() => mergedTodos(mentor.messages), [mentor.messages]);
+
+  const clearTimers = () => {
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    pollTimer.current = null;
+    hideTimer.current = null;
+  };
+
+  useEffect(() => clearTimers, []);
+
+  useEffect(() => {
+    if (!saved) return;
+    if (saved.state !== "successful" && saved.state !== "failed") return;
+    hideTimer.current = setTimeout(() => setSaved(null), saved.state === "successful" ? 12000 : 8000);
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [saved]);
+
+  const saveFile = async (path: string) => {
+    clearTimers();
+    const name = fileName(path);
+    const result = await downloadFile(mentor.fileUrl(path, true), name);
+    if (result.id === null) {
+      setSaved({ id: null, name: result.filename, state: "successful" });
+      return;
+    }
+    const id = result.id;
+    setSaved({ id, name: result.filename, state: "running" });
+    const started = Date.now();
+    const tick = async () => {
+      const state = await downloadStatus(id);
+      if (state === "successful" || state === "failed") {
+        setSaved({ id, name: result.filename, state });
+        return;
+      }
+      if (Date.now() - started > 120_000) {
+        setSaved({ id, name: result.filename, state: "failed" });
+        return;
+      }
+      pollTimer.current = setTimeout(() => void tick(), 800);
+    };
+    pollTimer.current = setTimeout(() => void tick(), 800);
+  };
 
   if (!mentor.connected) {
     return <ConnectScreen mentor={mentor} />;
@@ -62,7 +116,15 @@ export default function App() {
   );
 
   return (
-    <div className="bg-chatcn-bg text-chatcn-fg flex h-dvh min-h-0 overflow-hidden">
+    <div
+      className="bg-chatcn-bg text-chatcn-fg flex h-dvh min-h-0 overflow-hidden"
+      style={{
+        paddingTop: "var(--safe-top)",
+        paddingBottom: "max(var(--safe-bottom), var(--keyboard-inset))",
+        paddingLeft: "var(--safe-left)",
+        paddingRight: "var(--safe-right)",
+      }}
+    >
       {!railCollapsed ? (
         <aside data-testid="session-rail" className="hidden w-[272px] shrink-0 lg:block">
           <SessionRail mentor={mentor} />
@@ -74,9 +136,13 @@ export default function App() {
       ) : null}
       <aside
         className={
-          "bg-chatcn-bg fixed inset-y-0 start-0 z-50 w-[280px] max-w-[85vw] transition-transform duration-200 lg:hidden " +
+          "bg-chatcn-bg fixed start-0 z-50 w-[280px] max-w-[85vw] transition-transform duration-200 lg:hidden " +
           (railOpen ? "translate-x-0" : "-translate-x-full")
         }
+        style={{
+          top: "var(--safe-top)",
+          bottom: "max(var(--safe-bottom), var(--keyboard-inset))",
+        }}
       >
         <SessionRail mentor={mentor} onClose={() => setRailOpen(false)} />
       </aside>
@@ -112,11 +178,10 @@ export default function App() {
             attachments={mentor.attachments}
             onAttachFiles={(files) => void mentor.attachFiles(files)}
             onRemoveAttachment={mentor.removeAttachment}
+            onForkMessage={(message) => void mentor.forkMessage(message)}
             files={mentor.files}
             onOpenFile={(path) => void openFile(mentor.fileUrl(path))}
-            onDownloadFile={(path) =>
-              void downloadFile(mentor.fileUrl(path, true), fileName(path))
-            }
+            onDownloadFile={(path) => void saveFile(path)}
             onRefreshFiles={() => void mentor.refreshFiles()}
             workspace={todos.length ? { todos } : undefined}
             permissionModes={[]}
@@ -137,6 +202,16 @@ export default function App() {
           />
         </div>
       </main>
+
+      {saved ? (
+        <DownloadToast
+          file={saved}
+          onOpen={() => {
+            if (saved.id !== null) void openDownload(saved.id);
+          }}
+          onDismiss={() => setSaved(null)}
+        />
+      ) : null}
 
       {modelOpen ? <ModelDialog mentor={mentor} onClose={() => setModelOpen(false)} /> : null}
       {settingsOpen ? (

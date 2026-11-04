@@ -1,7 +1,10 @@
 package com.mentor.app;
 
 import android.app.DownloadManager;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
+import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Environment;
 import android.webkit.CookieManager;
@@ -58,9 +61,95 @@ public class DownloaderPlugin extends Plugin {
             long id = manager.enqueue(request);
             JSObject result = new JSObject();
             result.put("id", id);
+            result.put("filename", filename);
             call.resolve(result);
         } catch (Exception error) {
             call.reject("Could not start the download", error);
+        }
+    }
+
+    /** "pending", "running", "successful" or "failed". */
+    @PluginMethod
+    public void status(PluginCall call) {
+        Long id = call.getLong("id");
+        if (id == null) {
+            call.reject("id is required");
+            return;
+        }
+
+        DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) {
+            call.reject("DownloadManager is not available");
+            return;
+        }
+
+        try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                call.reject("Download not found");
+                return;
+            }
+            int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            int titleIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE);
+            int raw = cursor.getInt(statusIndex);
+            String state =
+                raw == DownloadManager.STATUS_SUCCESSFUL
+                    ? "successful"
+                    : raw == DownloadManager.STATUS_FAILED
+                        ? "failed"
+                        : raw == DownloadManager.STATUS_RUNNING
+                            ? "running"
+                            : "pending";
+            JSObject result = new JSObject();
+            result.put("status", state);
+            if (titleIndex >= 0 && !cursor.isNull(titleIndex)) {
+                result.put("filename", cursor.getString(titleIndex));
+            }
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("Could not read the download", error);
+        }
+    }
+
+    /** Open a finished download in the app that handles its type. */
+    @PluginMethod
+    public void open(PluginCall call) {
+        Long id = call.getLong("id");
+        if (id == null) {
+            call.reject("id is required");
+            return;
+        }
+
+        DownloadManager manager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+        if (manager == null) {
+            call.reject("DownloadManager is not available");
+            return;
+        }
+
+        try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                call.reject("Download not found");
+                return;
+            }
+            int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (cursor.getInt(statusIndex) != DownloadManager.STATUS_SUCCESSFUL) {
+                call.reject("The file is still downloading");
+                return;
+            }
+            int uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+            int typeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE);
+            String uriString = cursor.getString(uriIndex);
+            String mime = typeIndex >= 0 && !cursor.isNull(typeIndex) ? cursor.getString(typeIndex) : null;
+
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(Uri.parse(uriString), mime != null ? mime : "*/*");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (ActivityNotFoundException error) {
+            call.reject("No app can open this file", error);
+        } catch (Exception error) {
+            call.reject("Could not open the file", error);
         }
     }
 }

@@ -12,7 +12,7 @@ import { DiffStat, DiffViewer } from "@/components/ui/chatcn/diff-viewer"
 import { EmptyState } from "@/components/ui/chatcn/empty-state"
 import { Markdown } from "@/components/ui/chatcn/markdown"
 import { Message, MessageContent, MessageStatus } from "@/components/ui/chatcn/message"
-import { MessageActionCopy, MessageActions } from "@/components/ui/chatcn/message-actions"
+import { MessageAction, MessageActionCopy, MessageActions } from "@/components/ui/chatcn/message-actions"
 import { type MessagePartComponents, MessageParts } from "@/components/ui/chatcn/message-parts"
 import {
   permissionModes as defaultPermissionModes,
@@ -68,6 +68,7 @@ import {
   FileTextIcon,
   FolderIcon,
   GitBranchIcon,
+  GitForkIcon,
   ImageIcon,
   ListChecksIcon,
   MessageSquareIcon,
@@ -213,6 +214,9 @@ interface CodingAgentProps extends Omit<React.ComponentProps<"div">, "title"> {
   /** Files from the attach button, paste or drop. */
   onAttachFiles?: (files: File[]) => void
   onRemoveAttachment?: (path: string) => void
+
+  /** Branch the conversation at a message, seeding a new chat with the turns before it. */
+  onForkMessage?: (message: ChatcnMessage) => void
 
   /** Everything in the session workspace: uploads plus anything the agent wrote. */
   files?: WorkspaceFile[]
@@ -583,18 +587,37 @@ const AgentMessage = React.memo(function AgentMessage({
   streaming,
   stopped,
   latest,
+  onFork,
 }: {
   message: ChatcnMessage
   streaming: boolean
   stopped: boolean
   latest: boolean
+  onFork?: (message: ChatcnMessage) => void
 }) {
   const groups = React.useMemo(() => readGroups(message), [message])
   const text = messageText(message)
+  const fork = onFork ? (
+    <MessageAction label="Fork from here" onClick={() => onFork(message)}>
+      <GitForkIcon className="size-4" />
+    </MessageAction>
+  ) : null
+
   if (message.role !== "assistant") {
     return (
-      <Message from={message.role}>
-        <MessageContent>{text}</MessageContent>
+      <Message
+        from={message.role}
+        layout="flat"
+        latest={latest}
+        className="items-center"
+      >
+        <MessageContent className="chatcn-text-15 bg-chatcn-fill rounded-chatcn-xl w-fit max-w-[85%] px-4 py-2.5 text-start">
+          {text}
+        </MessageContent>
+        <MessageActions className="ms-0 justify-center">
+          <MessageActionCopy value={text} label="Copy message" />
+          {fork}
+        </MessageActions>
       </Message>
     )
   }
@@ -605,6 +628,7 @@ const AgentMessage = React.memo(function AgentMessage({
       state={streaming ? "streaming" : stopped ? "stopped" : "done"}
       latest={latest}
       announce={false}
+      className="items-center"
     >
       <MessageContent>
         <GroupContext.Provider value={groups}>
@@ -620,8 +644,9 @@ const AgentMessage = React.memo(function AgentMessage({
       </MessageContent>
       <MessageStatus />
       {!streaming && !waiting && text ? (
-        <MessageActions>
+        <MessageActions className="justify-center">
           <MessageActionCopy value={text} label="Copy response" />
+          {fork}
         </MessageActions>
       ) : null}
     </Message>
@@ -1088,6 +1113,7 @@ function MentorAgent({
   attachments = [],
   onAttachFiles,
   onRemoveAttachment,
+  onForkMessage,
   files: workspaceFiles = [],
   onOpenFile,
   onDownloadFile,
@@ -1316,6 +1342,7 @@ function MentorAgent({
               streaming={message.id === liveId}
               stopped={stopped.has(message.id)}
               latest={i === messages.length - 1}
+              onFork={onForkMessage}
             />
           ))}
         </ConversationContent>
@@ -1326,7 +1353,7 @@ function MentorAgent({
   const composer = (
     <div
       data-slot="coding-agent-composer"
-      className="mx-auto flex w-full max-w-[720px] shrink-0 flex-col gap-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] @3xl/coding-agent:px-4 @3xl/coding-agent:pb-4"
+      className="mx-auto flex w-full max-w-[720px] shrink-0 flex-col gap-2 px-3 pb-3 @3xl/coding-agent:px-4 @3xl/coding-agent:pb-4"
     >
       {todos.length ? <TodoList items={todos} collapsible defaultOpen={false} /> : null}
       {queue.length ? <QueuedMessages items={queue} onItemsChange={setQueue} /> : null}

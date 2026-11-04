@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatcnMessage, ChatcnPart, ChatcnToolPart } from "@/lib/chatcn-types";
+import type { ChatcnMessage, ChatcnPart, ChatcnTextPart, ChatcnToolPart } from "@/lib/chatcn-types";
 import {
   ApiClient,
   modelRef,
@@ -199,6 +199,15 @@ export function messagesFromSnapshot(raw: unknown[]): ChatcnMessage[] {
  * Hook
  * -----------------------------------------------------------------------------------------------*/
 
+/** The text a forked session keeps from a turn. Tool traces are dropped on purpose. */
+function messageTextOf(message: ChatcnMessage): string {
+  return message.parts
+    .filter((part): part is ChatcnTextPart => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n")
+    .trim();
+}
+
 interface RunState {
   assistantId: string;
   textPart: number | null;
@@ -245,6 +254,17 @@ export function useMentor() {
   const levelRef = useRef("medium");
   const filesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoConnected = useRef(false);
+  /** Resolvers waiting for the next session snapshot, used when seeding a fork. */
+  const snapshotWaiters = useRef<Array<() => void>>([]);
+
+  const waitForSnapshot = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        snapshotWaiters.current.push(resolve);
+        window.setTimeout(resolve, 1500);
+      }),
+    [],
+  );
 
   const publish = useCallback((next: ChatcnMessage[]) => {
     messagesRef.current = next;
@@ -648,6 +668,9 @@ export function useMentor() {
         } catch {
           setLoadingSession(false);
         }
+        const waiters = snapshotWaiters.current;
+        snapshotWaiters.current = [];
+        for (const resolve of waiters) resolve();
         void refreshFiles(id);
       });
       source.onmessage = (raw) => {
@@ -849,6 +872,55 @@ export function useMentor() {
       }
     },
     [attachments, ensureSession, publish],
+  );
+
+  /**
+   * Branch the conversation at a message.
+   *
+   * A user message is replayed as the first prompt of a new chat, with every
+   * earlier turn seeded as context. An assistant message keeps the reply too and
+   * opens the new chat ready for the next question.
+   */
+  const forkMessage = useCallback(
+    async (message: ChatcnMessage) => {
+      const api = clientRef.current;
+      if (!api) return;
+      const index = messagesRef.current.findIndex((item) => item.id === message.id);
+      if (index < 0) return;
+      const at = messagesRef.current[index];
+      const keep = at.role === "assistant" ? index + 1 : index;
+      const seed = messagesRef.current
+        .slice(0, keep)
+        .map((item) => ({ role: item.role, text: messageTextOf(item) }))
+        .filter(
+          (item): item is { role: "user" | "assistant"; text: string } =>
+            (item.role === "user" || item.role === "assistant") && item.text.length > 0,
+        );
+      const resend = at.role === "user" ? messageTextOf(at) : "";
+      const title = (resend || seed.find((item) => item.role === "user")?.text || "Forked chat")
+        .split("\n")[0]
+        .slice(0, 60);
+
+      try {
+        const created = await api.createSession({
+          model: modelRefValue.current ?? undefined,
+          thinkingLevel: levelRef.current,
+          parent: activeIdRef.current ?? undefined,
+          seed,
+          title,
+        });
+        setSessions((prev) => [created.session, ...prev]);
+        setActive(created.session.id);
+        setAttachments([]);
+        setStatus("ready");
+        connectStream(created.session.id, true);
+        await waitForSnapshot();
+        if (resend) await send(resend);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    },
+    [connectStream, send, setActive, waitForSnapshot],
   );
 
   const stop = useCallback(async () => {
@@ -1060,6 +1132,7 @@ export function useMentor() {
     deleteSession,
     send,
     stop,
+    forkMessage,
     attachFiles,
     removeAttachment,
     setModel,

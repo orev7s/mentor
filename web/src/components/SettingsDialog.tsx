@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Mentor } from "@/hooks/use-mentor";
 import type { CustomProvider } from "@/lib/api";
 import { ChevronDownIcon, PlusIcon, XIcon } from "@/lib/chatcn-icons";
+import { runningBundleVersion } from "@/lib/updater";
 import { cn } from "@/lib/utils";
 
 const input =
@@ -13,6 +14,16 @@ export function SettingsDialog({ mentor, onClose }: { mentor: Mentor; onClose: (
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [status, setStatus] = useState("");
   const [showCustom, setShowCustom] = useState(false);
+  const [bundleVersion, setBundleVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void runningBundleVersion().then((version) => {
+      if (alive) setBundleVersion(version);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [custom, setCustom] = useState({
     id: "",
     name: "",
@@ -277,6 +288,9 @@ export function SettingsDialog({ mentor, onClose }: { mentor: Mentor; onClose: (
           </section>
 
           <section className="border-chatcn-border border-t pt-5">
+            <p className="chatcn-text-12 text-chatcn-fg-subtle mb-4 font-mono">
+              {bundleVersion ? `Running bundle ${bundleVersion}` : "Running the bundled app"}
+            </p>
             <button
               type="button"
               onClick={() => {

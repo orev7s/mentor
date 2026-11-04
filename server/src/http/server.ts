@@ -166,11 +166,24 @@ export function createServer(config: ServerConfig, manager: AgentManager) {
   app.post(
     "/sessions",
     asyncHandler(async (req, res) => {
-      const { model, thinkingLevel, title } = req.body ?? {};
+      const { model, thinkingLevel, title, parent, seed } = req.body ?? {};
       const session = await manager.create({
-        model,
-        thinkingLevel: thinkingLevel as ThinkingLevel | undefined,
+        model: typeof model === "string" && model ? model : config.defaultModel,
+        thinkingLevel:
+          typeof thinkingLevel === "string"
+            ? (thinkingLevel as ThinkingLevel)
+            : (config.defaultThinkingLevel as ThinkingLevel | undefined),
         title,
+        parent: typeof parent === "string" ? parent : undefined,
+        seed: Array.isArray(seed)
+          ? (seed as { role?: unknown; text?: unknown }[])
+              .filter(
+                (item) =>
+                  (item?.role === "user" || item?.role === "assistant") &&
+                  typeof item?.text === "string",
+              )
+              .map((item) => ({ role: item.role as "user" | "assistant", text: item.text as string }))
+          : undefined,
       });
       res.status(201).json({ session: session.meta });
     }),

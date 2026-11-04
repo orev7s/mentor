@@ -544,6 +544,19 @@
 }
 
 @layer base {
+  :root {
+    /**
+     * System bar insets. Android 15+ runs apps edge to edge, so the page sits
+     * under the status bar and the keyboard. MainActivity pushes real pixel
+     * values into the *-native variables; the env() values cover iOS and the
+     * browser. The max() keeps whichever is larger.
+     */
+    --safe-top: max(var(--safe-top-native, 0px), env(safe-area-inset-top, 0px));
+    --safe-bottom: max(var(--safe-bottom-native, 0px), env(safe-area-inset-bottom, 0px));
+    --safe-left: max(var(--safe-left-native, 0px), env(safe-area-inset-left, 0px));
+    --safe-right: max(var(--safe-right-native, 0px), env(safe-area-inset-right, 0px));
+    --keyboard-inset: var(--keyboard-inset-native, 0px);
+  }
   * {
     @apply border-border outline-ring/50;
   }
@@ -557,6 +570,7 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
     overscroll-behavior: none;
+    background-color: var(--chatcn-bg);
   }
   button {
     font-family: inherit;

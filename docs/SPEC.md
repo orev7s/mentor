@@ -71,7 +71,7 @@ Sessions:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/sessions` | List sessions |
-| POST | `/sessions` | Create `{ model?, thinkingLevel?, title? }` |
+| POST | `/sessions` | Create `{ model?, thinkingLevel?, title?, parent?, seed? }`. `seed` replays earlier turns for a fork |
 | GET | `/sessions/:id` | Metadata plus transcript snapshot |
 | PATCH | `/sessions/:id` | `{ model?, thinkingLevel? }` switch a live session |
 | DELETE | `/sessions/:id` | Delete session, workspace, and files |
@@ -118,7 +118,7 @@ session workspace. `customTools` adds to that set. Added as custom tools:
 | `share_file` | Offers one workspace file as a download card in the reply |
 | `read_document` | Extract text from PDF (unpdf), DOCX (mammoth), HTML (turndown), MD/TXT |
 | `ocr_image` | OCR an image with tesseract.js (offline) |
-| `web_search` | Exa when `EXA_API_KEY` is set, else keyless DuckDuckGo |
+| `web_search` | Exa when `EXA_API_KEY` is set, else keyless Bing HTML (DuckDuckGo only as a last resort) |
 | `web_fetch` | Fetch a URL, readability to markdown |
 
 Every file tool refuses paths outside the workspace. A tutor system prompt is
@@ -131,12 +131,25 @@ cite sources, save deliverables in the workspace so Files shows them).
   Files, Changes and Terminal tabs. Above that the chat and the workspace sit
   side by side, and the header folds either away: one button for the chat list,
   one for the workspace.
+- Messages share one centered column. The student's turns keep a filled bubble,
+  the agent's stay flat, and both are centered rather than pinned to opposite
+  edges. Every message has Copy; every message has Fork from here.
+- Forking at a user turn seeds a new session with the turns before it and
+  resends that text. Forking at an assistant turn seeds through that reply and
+  leaves the new chat ready for the next question. Seeds are text only: Pi is
+  given real user and assistant messages, never a tool call without its result.
 - The composer carries the model chip and the providers/settings button, so the
   header stays a title, a run status and the two fold buttons.
-- Downloads on Android go through a `DownloadListener` in `MainActivity` that
-  hands the URL to the system `DownloadManager`. The server sends
-  `Content-Disposition` with the real name and extension, so a PDF lands as
-  `report.pdf` in Downloads. In a plain browser a normal `<a download>` is used.
+- Downloads on Android go through a `Downloader` plugin that hands the URL to
+  the system `DownloadManager`. The server sends `Content-Disposition` with the
+  real name and extension, so a PDF lands as `report.pdf` in Downloads. The
+  client polls the download and shows a toast with Open when it is ready. In a
+  plain browser a normal `<a download>` is used.
+- Android 15 and later run apps edge to edge. `MainActivity` turns that into
+  `--safe-top`, `--safe-bottom` and `--keyboard-inset` CSS variables, and the
+  app shell pads the header, the drawer and the composer with them. The
+  activity uses `adjustNothing` so the keyboard never pans the page on top of
+  its own padding.
 - `web/src/lib/updater.ts` checks GitHub releases on launch (native only),
   downloads a newer web bundle and stages it for the next launch. See
   `docs/UPDATES.md`.

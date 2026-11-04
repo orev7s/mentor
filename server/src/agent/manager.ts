@@ -51,8 +51,53 @@ export interface SessionMeta {
   cwd: string;
   /** Pi JSONL session file, used to resume. */
   file?: string;
+  /** Session this one was forked from, if any. */
+  parent?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Prior turns replayed into a fresh session when forking. Text only. */
+export interface SeedMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/**
+ * Replay a conversation into a new session before the first prompt. The student
+ * forks from a point in a chat, so the new session keeps the earlier turns as
+ * context. Tool calls are left out on purpose: a lone tool call with no matching
+ * result would make providers reject the request.
+ */
+function appendSeed(manager: SessionManager, seed: SeedMessage[], model?: string): void {
+  if (!seed.length) return;
+  const now = Date.now();
+  const [provider = "openrouter", ...modelParts] = (model ?? "").split("/");
+  for (const item of seed) {
+    const text = item.text.trim();
+    if (!text) continue;
+    if (item.role === "user") {
+      manager.appendMessage({ role: "user", content: text, timestamp: now });
+      continue;
+    }
+    manager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text }],
+      api: "openai-completions",
+      provider,
+      model: modelParts.join("/") || "unknown",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: now,
+    } as unknown as Parameters<SessionManager["appendMessage"]>[0]);
+  }
 }
 
 /** Trim the SDK event stream to what the phone UI needs. */
@@ -147,9 +192,10 @@ export class TutorSession {
     }
   }
 
-  static async create(meta: SessionMeta): Promise<TutorSession> {
+  static async create(meta: SessionMeta, seed: SeedMessage[] = []): Promise<TutorSession> {
     const model = meta.model ? await resolveModelRef(meta.model) : undefined;
     const manager = SessionManager.create(meta.cwd, paths.sessions);
+    appendSeed(manager, seed, meta.model);
     const { session } = await createAgentSession({
       cwd: meta.cwd,
       agentDir: paths.agentDir,
@@ -294,6 +340,8 @@ export class AgentManager {
     model?: string;
     thinkingLevel?: ThinkingLevel;
     title?: string;
+    parent?: string;
+    seed?: SeedMessage[];
   }): Promise<TutorSession> {
     ensureDirs();
     const id = randomUUID();
@@ -306,10 +354,11 @@ export class AgentManager {
       model: input.model,
       thinkingLevel: input.thinkingLevel ?? "medium",
       cwd,
+      parent: input.parent,
       createdAt: now,
       updatedAt: now,
     };
-    const session = await TutorSession.create(meta);
+    const session = await TutorSession.create(meta, input.seed ?? []);
     this.active.set(id, session);
     this.index.push(meta);
     this.saveIndex();

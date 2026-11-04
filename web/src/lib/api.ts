@@ -45,6 +45,7 @@ export interface SessionMeta {
   model?: string;
   thinkingLevel: string;
   cwd: string;
+  parent?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -150,7 +151,13 @@ export class ApiClient {
     return this.request<{ sessions: SessionMeta[] }>("GET", "/sessions");
   }
 
-  createSession(body: { model?: string; thinkingLevel?: string; title?: string }) {
+  createSession(body: {
+    model?: string;
+    thinkingLevel?: string;
+    title?: string;
+    parent?: string;
+    seed?: { role: "user" | "assistant"; text: string }[];
+  }) {
     return this.request<{ session: SessionMeta }>("POST", "/sessions", body);
   }
 

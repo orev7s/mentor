@@ -144,6 +144,25 @@ try {
   await page.screenshot({ path: join(SHOTS, "13-tablet-portrait.png") });
   log("tablet captured");
 
+  // The student's own turns can be copied and forked from.
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.waitForTimeout(600);
+  const firstUser = page.locator('[data-slot="message"][data-role="user"]').first();
+  await firstUser.hover();
+  log(
+    `user copy button: ${await firstUser.getByRole("button", { name: "Copy message" }).count()}`,
+  );
+  const lastAssistant = page.locator('[data-slot="message"][data-role="assistant"]').last();
+  await lastAssistant.hover();
+  const forkButton = lastAssistant.getByRole("button", { name: "Fork from here" });
+  log(`assistant fork button: ${await forkButton.count()}`);
+  await forkButton.click();
+  await page.waitForTimeout(2500);
+  const forkUsers = await page.locator('[data-slot="message"][data-role="user"]').count();
+  const forkReplies = await page.locator('[data-slot="message"][data-role="assistant"]').count();
+  log(`forked chat: ${forkUsers} user, ${forkReplies} assistant`);
+  await page.screenshot({ path: join(SHOTS, "14-forked-chat.png") });
+
   await page.setViewportSize({ width: 412, height: 915 });
   await page.waitForTimeout(600);
   await page.screenshot({ path: join(SHOTS, "09-chat-phone.png") });

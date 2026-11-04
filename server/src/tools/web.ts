@@ -11,7 +11,7 @@ interface SearchResult {
   snippet: string;
 }
 
-/** Prefer Exa when a key is set; fall back to keyless DuckDuckGo HTML scraping. */
+/** Prefer Exa when a key is set; fall back to keyless Bing HTML scraping. */
 async function search(query: string, limit: number): Promise<SearchResult[]> {
   const exaKey = process.env.EXA_API_KEY;
   if (exaKey) {
@@ -35,7 +35,57 @@ async function search(query: string, limit: number): Promise<SearchResult[]> {
       }));
     }
   }
+  const bing = await bingSearch(query, limit);
+  if (bing.length) return bing;
   return duckDuckGo(query, limit);
+}
+
+/**
+ * Bing still serves clean HTML without an API key. DuckDuckGo's HTML endpoint
+ * now answers with a 202 challenge page, so it stays as a last resort only.
+ */
+async function bingSearch(query: string, limit: number): Promise<SearchResult[]> {
+  const res = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}`, {
+    headers: {
+      "user-agent": USER_AGENT,
+      "accept-language": "en-US,en;q=0.9",
+    },
+    redirect: "follow",
+  });
+  if (!res.ok) return [];
+  const html = await res.text();
+  const results: SearchResult[] = [];
+  const blocks = html.split(/<li class="b_algo"/i).slice(1);
+  for (const block of blocks) {
+    if (results.length >= limit) break;
+    const link = /<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    if (!link) continue;
+    const url = decodeBingUrl(decodeHtml(link[1]));
+    const title = stripTags(link[2]);
+    if (!url || !title) continue;
+    const snippetMatch =
+      /<p[^>]*class="[^"]*b_lineclamp[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(block) ??
+      /<div class="b_caption"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i.exec(block) ??
+      /<p[^>]*>([\s\S]*?)<\/p>/i.exec(block);
+    results.push({
+      title,
+      url,
+      snippet: snippetMatch ? stripTags(snippetMatch[1]) : "",
+    });
+  }
+  return results;
+}
+
+/** Bing wraps results in `/ck/a?...&u=a1<base64url>`; unwrap the real URL. */
+function decodeBingUrl(url: string): string {
+  const match = /[?&]u=a1([^&]+)/.exec(url);
+  if (!match) return url;
+  try {
+    const base64 = decodeURIComponent(match[1]).replace(/-/g, "+").replace(/_/g, "/");
+    return Buffer.from(base64, "base64").toString("utf8");
+  } catch {
+    return url;
+  }
 }
 
 async function duckDuckGo(query: string, limit: number): Promise<SearchResult[]> {
@@ -70,6 +120,8 @@ function stripTags(html: string): string {
 
 function decodeHtml(text: string): string {
   return text
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")

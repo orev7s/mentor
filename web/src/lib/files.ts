@@ -7,16 +7,23 @@ import { Browser } from "@capacitor/browser";
  * Android's WebView cannot write into Downloads by itself. It either stores a
  * blob under a guessed name (`download.bin`) or hands the URL to a browser.
  * The local Downloader plugin calls Android's DownloadManager, which writes the
- * real name and extension into the public Downloads folder and shows a
- * completion notification. The server sends Content-Disposition too, so links
- * opened outside the app keep their names as well.
+ * real name and extension into the public Downloads folder.
  */
 
+export type DownloadState = "pending" | "running" | "successful" | "failed";
+
 interface DownloaderPlugin {
-  download(options: { url: string; filename: string }): Promise<{ id: number }>;
+  download(options: { url: string; filename: string }): Promise<{ id: number; filename: string }>;
+  status(options: { id: number }): Promise<{ status: DownloadState; filename?: string }>;
+  open(options: { id: number }): Promise<void>;
 }
 
 const Downloader = registerPlugin<DownloaderPlugin>("Downloader");
+
+export interface DownloadResult {
+  id: number | null;
+  filename: string;
+}
 
 /** Open a file for a quick look. Native uses the system browser so PDFs render. */
 export async function openFile(url: string): Promise<void> {
@@ -32,11 +39,11 @@ export async function openFile(url: string): Promise<void> {
 }
 
 /** Save a file. On Android the native plugin hands it to DownloadManager. */
-export async function downloadFile(url: string, filename: string): Promise<void> {
+export async function downloadFile(url: string, filename: string): Promise<DownloadResult> {
   if (Capacitor.isNativePlatform()) {
     try {
-      await Downloader.download({ url, filename });
-      return;
+      const result = await Downloader.download({ url, filename });
+      return { id: result.id, filename: result.filename ?? filename };
     } catch {
       // The plugin is missing in an older APK. Fall back to the browser.
       try {
@@ -44,8 +51,8 @@ export async function downloadFile(url: string, filename: string): Promise<void>
       } catch {
         window.location.assign(url);
       }
+      return { id: null, filename };
     }
-    return;
   }
 
   const link = document.createElement("a");
@@ -56,6 +63,23 @@ export async function downloadFile(url: string, filename: string): Promise<void>
   document.body.appendChild(link);
   link.click();
   link.remove();
+  return { id: null, filename };
+}
+
+/** How DownloadManager is getting on with the file. */
+export async function downloadStatus(id: number): Promise<DownloadState> {
+  if (!Capacitor.isNativePlatform()) return "successful";
+  try {
+    const result = await Downloader.status({ id });
+    return result.status;
+  } catch {
+    return "failed";
+  }
+}
+
+/** Open a finished download with whatever app handles its type. */
+export async function openDownload(id: number): Promise<void> {
+  await Downloader.open({ id });
 }
 
 export function fileName(path: string): string {

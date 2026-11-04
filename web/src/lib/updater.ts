@@ -117,6 +117,19 @@ async function runningVersion(): Promise<string> {
   }
 }
 
+/** The bundle the app is running right now, for the settings screen. */
+export async function runningBundleVersion(): Promise<string | null> {
+  if (!Capacitor.isNativePlatform()) return null;
+  try {
+    const current = await CapacitorUpdater.current();
+    const version = current.bundle.version || current.native;
+    const kind = current.bundle.id === "builtin" ? "bundled" : "web";
+    return version ? `${version} (${kind})` : null;
+  } catch {
+    return null;
+  }
+}
+
 async function checkForUpdate(): Promise<void> {
   if (!REPO) return;
   const [releases, running] = await Promise.all([fetchReleases(), runningVersion()]);

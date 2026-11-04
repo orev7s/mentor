@@ -21,6 +21,10 @@ On every launch, before React renders, `web/src/lib/updater.ts` runs:
 There is no dialog, no splash, and nothing for the student to tap. If the
 download fails or the phone is offline, it just tries again next launch.
 
+To see which bundle is live, open Settings. It shows `Running bundle 1.0.3
+(web)` after an update has applied, or `1.0.2 (bundled)` while the copy that
+shipped inside the APK is still in use.
+
 The repo is `orev7s/mentor` by default. Override it at build time with
 `VITE_UPDATE_REPO`, or edit `DEFAULT_REPO` in `web/src/lib/updater.ts`.
 

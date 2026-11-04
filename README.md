@@ -26,13 +26,18 @@ The chat surface is the chatcn coding-agent block, adapted for tutoring:
 - at the end of every run, a card listing the files that run created or changed,
   each with its own download button
 - `share_file` cards, where the agent points at one deliverable and offers it
+- a toast that says a download is running, then saved, with Open
+- copy on every message, and Fork from here to branch a chat at any turn
 - sessions, model picker and reasoning effort in the composer, providers in
   settings
 
 The layout is mobile first. The sidebar and the files/changes/terminal pane can
 both be folded away on tablet and desktop, and the pane stacks into tabs under
-900 px. Tap targets grow on touch. Downloads on Android go through the system
-`DownloadManager`, so a PDF saves as a PDF, not `download.bin`.
+900 px. Tap targets grow on touch. The header and composer clear the system bars
+and the keyboard through insets pushed from `MainActivity`, which matters on
+Android 15 and later where apps are edge to edge. Downloads on Android go
+through the system `DownloadManager`, so a PDF saves as a PDF, not
+`download.bin`.
 
 ## The agent toolset
 
@@ -45,7 +50,7 @@ adds:
 | `share_file` | Hands the student one file as a download card |
 | `read_document` | Extracts text from PDF, DOCX, HTML, Markdown and text |
 | `ocr_image` | OCRs a photo or scan with tesseract.js |
-| `web_search` | Exa when `EXA_API_KEY` is set, otherwise keyless DuckDuckGo |
+| `web_search` | Exa when `EXA_API_KEY` is set, else keyless Bing HTML |
 | `web_fetch` | Fetches a page and converts it to readable text |
 
 Every tool is scoped to the session workspace. A tutor system prompt is appended
@@ -113,4 +118,4 @@ npm run ui-test
 
 It connects, sends a prompt that plans with `todo_write`, writes a file and runs
 `bash`, then captures the chat, Files, Changes, Terminal, model picker,
-settings, folded-panel, tablet and phone screens into `docs/screenshots/`.
+settings, folded-panel, tablet, fork and phone screens into `docs/screenshots/`.
