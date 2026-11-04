@@ -36,6 +36,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DownloaderPlugin.class);
         // Read aloud uses the Android text-to-speech engine through this plugin.
         registerPlugin(SpeakerPlugin.class);
+        // Loading the server origin in this WebView, without handing it to a browser.
+        registerPlugin(RemotePlugin.class);
         super.onCreate(savedInstanceState);
 
         // Android 15 and later force edge-to-edge, so the page runs under the

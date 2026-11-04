@@ -1,5 +1,11 @@
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { normaliseUrl } from "@/lib/api";
+
+interface RemotePlugin {
+  open(options: { url: string }): Promise<void>;
+}
+
+const Remote = registerPlugin<RemotePlugin>("Remote");
 
 /**
  * Remote mode: on Android, run the UI from the agent server instead of the
@@ -80,6 +86,13 @@ export function redirectToServer(url?: string, token?: string): boolean {
   const hash = secret
     ? `#${HASH_SERVER}=${encodeURIComponent(target.origin)}&${HASH_TOKEN}=${encodeURIComponent(secret)}`
     : "";
-  window.location.replace(`${target.origin}/${hash}`);
+  const destination = `${target.origin}/${hash}`;
+
+  // Load directly on the WebView. A location navigation would be classified as
+  // an external link and handed to Chrome, because the server host is not in
+  // allowNavigation (and a wildcard there breaks the local asset server).
+  void Remote.open({ url: destination }).catch(() => {
+    window.location.replace(destination);
+  });
   return true;
 }
